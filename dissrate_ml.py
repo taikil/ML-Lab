@@ -4,7 +4,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
-import h5py
 import keras
 from keras import Input
 import matplotlib.pyplot as plt
@@ -23,7 +22,7 @@ def get_file():
 
 # data_analysis.py
 # Global Variables
-FILENAME = ''  # Replace with the path to your .mat file
+FILENAME = ''
 THRESHOLD_PERCENTILE = 95   # Percentile for anomaly detection threshold
 
 
@@ -158,6 +157,35 @@ def filter_anomalies(autoencoder, X, threshold):
     print(f"Number of anomalies detected: {len(anomaly_indices)}")
 
     return normal_indices, anomaly_indices
+
+
+def plot_training_loss(history):
+    """
+    Plot the training and validation loss over epochs.
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (MSE)')
+    plt.title('Training and Validation Loss Over Epochs')
+    plt.legend()
+    plt.show()
+
+
+def plot_shear_spectrum(K, shear_spectrum, Nasmyth_spectrum):
+    """
+    Plot the measured shear spectrum and Nasmyth spectrum vs. wavenumber.
+    """
+    plt.figure(figsize=(8, 6))
+    plt.loglog(K, shear_spectrum, 'r', label='Measured Shear Spectrum')
+    plt.loglog(K, Nasmyth_spectrum, 'k--', label='Nasmyth Spectrum')
+    plt.xlabel('Wavenumber [cpm]')
+    plt.ylabel('Shear Spectrum [s$^{-2}$/cpm]')
+    plt.title('Shear Spectrum vs. Wavenumber')
+    plt.legend()
+    plt.grid(True, which="both", ls="--")
+    plt.show()
 
 
 def main():
