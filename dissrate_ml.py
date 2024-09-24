@@ -40,7 +40,7 @@ def load_mat_file(filename):
     diss = mat['diss']
 
     # Extract datasets
-    diss_e = diss['e'][0, 0].flatten()
+    diss_e = diss['e'][0, 0]
     diss_K = diss['K'][0, 0]
     diss_sh_clean = diss['sh_clean'][0, 0]
     diss_F = diss['F'][0, 0]
@@ -55,7 +55,7 @@ def preprocess_data(diss_e, diss_sh_clean):
     Handle missing values and scale the data.
     """
     # Remove NaNs
-    nan_indices = np.isnan(diss_e)
+    nan_indices = np.isnan(diss_e).any(axis=1)
     diss_e = diss_e[~nan_indices]
     diss_sh_clean = diss_sh_clean[~nan_indices]
 
@@ -174,7 +174,7 @@ def main():
     X = extract_features(diss_sh_clean_scaled)
 
     # Step 4: Identify Outliers in diss_e (Optional, using z-scores)
-    diss_e_zscores = zscore(diss_e)
+    diss_e_zscores = zscore(diss_e, axis=0)
     threshold_z = 3  # Adjust as needed
     outlier_indices = np.where(np.abs(diss_e_zscores) > threshold_z)[0]
     y = np.ones(len(diss_e))
