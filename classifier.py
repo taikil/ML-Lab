@@ -1,12 +1,15 @@
 import sys
 import numpy as np
 import scipy.io
+import h5py
 import scipy.signal as signal
 from scipy.signal import butter, filtfilt, medfilt
 from scipy.interpolate import interp1d
 from sklearn.ensemble import RandomForestRegressor
 import gsw  # Gibbs SeaWater Oceanographic Package of TEOS-10
+import matplotlib.pyplot as plt
 from diss_rate_odas_nagai import *
+
 
 FILENAME = ''
 
@@ -24,41 +27,96 @@ def get_file():
 def load_mat_file(filename):
     """
     Load the .mat file and extract 'data' and 'dataset' variables.
+    Supports both MATLAB v7.2 and v7.3 formats.
     """
-    mat_contents = scipy.io.loadmat(
-        filename, struct_as_record=False, squeeze_me=True)
-    data = mat_contents.get('data', None)
-    dataset = mat_contents.get('dataset', None)
+    try:
+        # Attempt to load using scipy.io.loadmat (supports v7.2 and below)
+        mat_contents = scipy.io.loadmat(
+            filename, struct_as_record=False, squeeze_me=True)
+        data = mat_contents.get('data', None)
+        dataset = mat_contents.get('dataset', None)
 
-    if data is None or dataset is None:
-        raise ValueError(
-            "The .mat file must contain 'data' and 'dataset' variables.")
+        if data is None or dataset is None:
+            raise ValueError(
+                "The .mat file does not contain 'data' and 'dataset' variables.")
 
-    return data, dataset
+        print("Loaded .mat file using scipy.io.loadmat (MATLAB v7.2 or below).")
+        return data, dataset
+    except NotImplementedError:
+        # Fallback to h5py for MATLAB v7.3
+        print("Loading .mat file using h5py (MATLAB v7.3).")
+        with h5py.File(filename, 'r') as f:
+            # Explore the file structure
+            print("Keys in the .mat file:")
+            for key in f.keys():
+                print(f"- {key}")
+
+            # Extract 'data' and 'dataset' assuming they are top-level groups
+            if 'data' in f.keys() and 'dataset' in f.keys():
+                data = extract_h5py_group(f['data'])
+                dataset = extract_h5py_group(f['dataset'])
+            else:
+                raise ValueError(
+                    "The .mat file does not contain 'data' and 'dataset' variables.")
+
+        # Additional debugging: Print structure of 'data' and 'dataset'
+        print("Structure of 'data':")
+        for key in data.keys():
+            print(
+                f"  - {key}: {data[key].shape if isinstance(data[key], np.ndarray) else type(data[key])}")
+
+        print("Structure of 'dataset':")
+        for key in dataset.keys():
+            print(f"  - {key}: {type(dataset[key])}")
+
+        return data, dataset
 
 
-def process_profile(data, dataset, params, model):
+def extract_h5py_group(group):
+    """
+    Recursively extract data from an h5py group into a dictionary.
+    """
+    out = {}
+    for key in group.keys():
+        item = group[key]
+        if isinstance(item, h5py.Group):
+            out[key] = extract_h5py_group(item)
+        elif isinstance(item, h5py.Dataset):
+            data = item[()]
+            # Convert byte strings to regular strings if necessary
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+            out[key] = data
+        else:
+            out[key] = item
+    return out
+
+
+def process_profile(data, dataset, params, model=None):
     """
     Process the profile data to calculate the dissipation rate.
     """
-    profile_num = params['profile_num'] - 1  # Adjust for zero-based indexing
-    profile = dataset[profile_num]
+    # Treat 'dataset' as the profile data directly
+    profile = dataset
 
-    # Extract variables
-    P_slow = profile.P_slow
-    JAC_T = profile.JAC_T
-    JAC_C = profile.JAC_C
-    P_fast = profile.P_fast
-    W_slow = profile.W_slow
-    W_fast = profile.W_fast
-    sh1 = profile.sh1
-    sh2 = profile.sh2
-    Ax = profile.Ax
-    Ay = profile.Ay
-    T1_fast = profile.T1_fast
+    # Extract variables with error handling
+    try:
+        P_slow = profile['P_slow']
+        JAC_T = profile['JAC_T']
+        JAC_C = profile['JAC_C']
+        P_fast = profile['P_fast']
+        W_slow = profile['W_slow']
+        W_fast = profile['W_fast']
+        sh1 = profile['sh1']
+        sh2 = profile['sh2']
+        Ax = profile['Ax']
+        Ay = profile['Ay']
+        T1_fast = profile['T1_fast']
+    except KeyError as e:
+        raise KeyError(f"Missing expected field in profile: {e}")
 
-    fs_fast = data.fs_fast
-    fs_slow = data.fs_slow
+    fs_fast = data['fs_fast']
+    fs_slow = data['fs_slow']
 
     # Compute derived quantities
     sigma_theta_fast = compute_density(
@@ -73,7 +131,7 @@ def process_profile(data, dataset, params, model):
 
     # Prepare data for dissipation rate calculation
     diss = calculate_dissipation_rate(
-        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, n, params, fs_fast, model
+        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, n, params, fs_fast
     )
 
     return diss
@@ -201,6 +259,31 @@ def calculate_dissipation_rate(
     # Calculate dissipation rate
     diss = get_diss_odas_nagai4gui2024(sh, A, press, info)
 
+    # Extract data for plotting
+    K = diss['K']               # Wavenumber array
+    P_sh = diss['P_sh']         # Measured shear spectra
+    epsilon = diss['epsilon']   # Dissipation rate estimates
+    P_nas = diss['P_nas']       # Nasmyth spectra
+
+    # Plot the results
+    for i in range(P_sh.shape[0]):  # Loop over probes
+        divergence_index = detect_divergence_point_threshold(
+            K, P_sh[i], P_nas[i], R_threshold=2.0
+        )
+        K_div = K[divergence_index]
+
+        plt.figure(figsize=(8, 6))
+        plt.loglog(K, P_sh[i], label='Measured Spectrum')
+        plt.loglog(K, P_nas[i], label='Nasmyth Spectrum')
+        plt.axvline(K_div, color='r', linestyle='--', label='Divergence Point')
+        plt.xlabel('Wavenumber [cpm]')
+        plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
+        plt.title(f'Shear Spectrum - Probe {i+1}')
+        plt.legend()
+        plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+        plt.tight_layout()
+        plt.show()
+
     return diss
 
 
@@ -211,6 +294,42 @@ def save_dissipation_rate(diss, profile_num):
     filename = f'dissrate_profile_{profile_num}.mat'
     scipy.io.savemat(filename, {'diss': diss})
     print(f"Dissipation rate saved to {filename}")
+
+
+def detect_divergence_point_threshold(K, P_measured, P_Nasmyth, R_threshold=2.0):
+    """
+    Detect divergence point based on a threshold ratio between measured and Nasmyth spectra.
+
+    Parameters:
+    - K: array of wavenumbers
+    - P_measured: array of measured shear spectrum values
+    - P_Nasmyth: array of Nasmyth spectrum values
+    - R_threshold: threshold ratio to determine divergence
+
+    Returns:
+    - divergence_index: index of divergence point in K
+    """
+    ratio = P_measured / P_Nasmyth
+    divergence_indices = np.where(ratio > R_threshold)[0]
+    if len(divergence_indices) > 0:
+        divergence_index = divergence_indices[0]
+    else:
+        divergence_index = len(K) - 1  # No divergence detected within range
+    return divergence_index
+
+
+def visc35(T):
+    """
+    Calculate the kinematic viscosity of seawater at salinity 35 PSU.
+    """
+    pol = [
+        -1.131311019739306e-11,   # Coefficient for T^3
+        1.199552027472192e-09,   # Coefficient for T^2
+        -5.864346822839289e-08,   # Coefficient for T^1
+        1.828297985908266e-06    # Constant term
+    ]
+    v = np.polyval(pol, T)
+    return v
 
 
 def main():
@@ -225,7 +344,8 @@ def main():
         'overlap': 4.0,         # Overlap length (s)
         'fit_2_Nasmyth': 0,     # Fit to Nasmyth spectrum (boolean)
         'min_duration': 60.0,   # Minimum profile duration (s)
-        'profile_num': 1,       # Profile number to process
+        # Profile number to process (fixed to 1 for naming)
+        'profile_num': 1,
         'P_start': 0.0,         # Start pressure (dbar)
         'P_end': 1000.0         # End pressure (dbar)
     }
@@ -234,7 +354,7 @@ def main():
 
     diss = process_profile(data, dataset, params)
 
-    # Save the results
+    # Save the results with profile_num set to 1
     save_dissipation_rate(diss, params['profile_num'])
 
     print("Processing completed successfully.")
