@@ -109,10 +109,8 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
     return e, K_max
 
 
-def get_diss_odas_nagai4gui2024(SH, A, SHBP, PRESS, handles,
-                                fft_length, diss_length, overlap, fs,
-                                speed, T, N2, P,
-                                fit_order=5, f_AA=98, fit_2_Nasmyth=0):
+def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
+                                speed, T, N2, P, fit_order=5, f_AA=98):
     """
     Calculate dissipation rates over an entire profile.
     """
@@ -182,11 +180,16 @@ def get_diss_odas_nagai4gui2024(SH, A, SHBP, PRESS, handles,
         W = np.mean(np.abs(speed[select]))
         K = F / W
         K_AA = f_AA / W
+        num_probes = SH.shape[1]
         correction = np.ones((num_probes, num_probes, len(K)))
-        junk = K[np.newaxis, np.newaxis, :]
-        correction_indices = junk <= 150
+
+        K_broadcast = K[np.newaxis, np.newaxis, :]  # Shape: (1, 1, len(K))
+        # Shape: (num_probes, num_probes, len(K))
+        K_broadcast = np.broadcast_to(K_broadcast, correction.shape)
+
+        correction_indices = K_broadcast <= 150
         correction[correction_indices] = 1 + \
-            (junk[correction_indices] / 48) ** 2
+            (K_broadcast[correction_indices] / 48) ** 2
 
         P_sh_clean *= W * correction
         P_sh *= W * correction
@@ -214,6 +217,7 @@ def get_diss_odas_nagai4gui2024(SH, A, SHBP, PRESS, handles,
                 # Use variance method
                 e_2 = e_1
                 K_95 = x_95 * (e_2 / nu ** 3) ** 0.25
+                K_95 = max(K_95, np.finfo(float).eps)  # Non-zero
                 K_limit = fit_in_range(min(K_AA, K_95), [0, 150])
                 valid_shear = K <= K_limit
                 Index_limit = np.sum(valid_shear)
@@ -241,7 +245,11 @@ def get_diss_odas_nagai4gui2024(SH, A, SHBP, PRESS, handles,
                 e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
 
                 # Continue with variance correction
-                x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
+                if e_3 > 0:
+                    x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
+                else:
+                    print("Warning: e_3 is zero, cannot compute x_limit.")
+                    x_limit = 0.0  # Error
                 x_limit **= (4 / 3)
                 variance_resolved = np.tanh(
                     48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)

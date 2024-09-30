@@ -46,43 +46,52 @@ def load_mat_file(filename):
         # Fallback to h5py for MATLAB v7.3
         print("Loading .mat file using h5py (MATLAB v7.3).")
         with h5py.File(filename, 'r') as f:
-            # Explore the file structure
-            print("Keys in the .mat file:")
-            for key in f.keys():
-                print(f"- {key}")
-
             # Extract 'data' and 'dataset' assuming they are top-level groups
             if 'data' in f.keys() and 'dataset' in f.keys():
-                data = extract_h5py_group(f['data'])
-                dataset = extract_h5py_group(f['dataset'])
+                data = extract_h5py_group(f['data'], f)
+                dataset = extract_h5py_group(f['dataset'], f)
             else:
                 raise ValueError(
                     "The .mat file does not contain 'data' and 'dataset' variables.")
 
-        # Additional debugging: Print structure of 'data' and 'dataset'
-        print("Structure of 'data':")
-        for key in data.keys():
-            print(
-                f"  - {key}: {data[key].shape if isinstance(data[key], np.ndarray) else type(data[key])}")
+            # Additional debugging: Print structure of 'data' and 'dataset'
+            print("Structure of 'data':")
+            for key in data.keys():
+                if isinstance(data[key], np.ndarray):
+                    print(f"  - {key}: {data[key].shape}")
+                else:
+                    print(f"  - {key}: {type(data[key])}")
 
-        print("Structure of 'dataset':")
-        for key in dataset.keys():
-            print(f"  - {key}: {type(dataset[key])}")
+            print("Structure of 'dataset':")
+            for key in dataset.keys():
+                if isinstance(dataset[key], np.ndarray):
+                    print(f"  - {key}: {dataset[key].shape}")
+                else:
+                    print(f"  - {key}: {type(dataset[key])}")
 
-        return data, dataset
+            return data, dataset
 
 
-def extract_h5py_group(group):
+def extract_h5py_group(group, file_handle):
     """
     Recursively extract data from an h5py group into a dictionary.
     """
     out = {}
     for key in group.keys():
         item = group[key]
+        # Handle groups recursively
         if isinstance(item, h5py.Group):
-            out[key] = extract_h5py_group(item)
+            out[key] = extract_h5py_group(item, file_handle)
+        # Handle datasets
         elif isinstance(item, h5py.Dataset):
             data = item[()]
+            # Check if data is a reference
+            if isinstance(data, h5py.Reference):
+                data = file_handle[data][()]
+            # Check if data is an array of references
+            elif isinstance(data, np.ndarray) and data.dtype == object:
+                data = np.array([file_handle[ref][()] if isinstance(
+                    ref, h5py.Reference) else ref for ref in data])
             # Convert byte strings to regular strings if necessary
             if isinstance(data, bytes):
                 data = data.decode('utf-8')
@@ -96,27 +105,41 @@ def process_profile(data, dataset, params, model=None):
     """
     Process the profile data to calculate the dissipation rate.
     """
-    # Treat 'dataset' as the profile data directly
-    profile = dataset
+    # Use 'data' as the profile data
+    profile = data
 
-    # Extract variables with error handling
+    # Extract and squeeze variables with error handling
     try:
-        P_slow = profile['P_slow']
-        JAC_T = profile['JAC_T']
-        JAC_C = profile['JAC_C']
-        P_fast = profile['P_fast']
-        W_slow = profile['W_slow']
-        W_fast = profile['W_fast']
-        sh1 = profile['sh1']
-        sh2 = profile['sh2']
-        Ax = profile['Ax']
-        Ay = profile['Ay']
-        T1_fast = profile['T1_fast']
+        P_slow = np.squeeze(profile['P_slow'])
+        JAC_T = np.squeeze(profile['JAC_T'])
+        JAC_C = np.squeeze(profile['JAC_C'])
+        P_fast = np.squeeze(profile['P_fast'])
+        W_slow = np.squeeze(profile['W_slow'])
+        W_fast = np.squeeze(profile['W_fast'])
+        sh1 = np.squeeze(profile['sh1'])
+        sh2 = np.squeeze(profile['sh2'])
+        Ax = np.squeeze(profile['Ax'])
+        Ay = np.squeeze(profile['Ay'])
+        T1_fast = np.squeeze(profile['T1_fast'])
     except KeyError as e:
         raise KeyError(f"Missing expected field in profile: {e}")
 
-    fs_fast = data['fs_fast']
-    fs_slow = data['fs_slow']
+    print("Shapes of extracted variables after squeezing:")
+    print(f"P_slow: {P_slow.shape}")
+    print(f"JAC_T: {JAC_T.shape}")
+    print(f"JAC_C: {JAC_C.shape}")
+    print(f"P_fast: {P_fast.shape}")
+    print(f"W_slow: {W_slow.shape}")
+    print(f"W_fast: {W_fast.shape}")
+    print(f"sh1: {sh1.shape}")
+    print(f"sh2: {sh2.shape}")
+    print(f"Ax: {Ax.shape}")
+    print(f"Ay: {Ay.shape}")
+    print(f"T1_fast: {T1_fast.shape}")
+
+    # Extract scalar sampling frequencies
+    fs_fast = profile['fs_fast'].item()  # Convert from array to scalar
+    fs_slow = profile['fs_slow'].item()  # Convert from array to scalar
 
     # Compute derived quantities
     sigma_theta_fast = compute_density(
@@ -257,7 +280,19 @@ def calculate_dissipation_rate(
     }
 
     # Calculate dissipation rate
-    diss = get_diss_odas_nagai4gui2024(sh, A, press, info)
+    diss = get_diss_odas_nagai4gui2024(
+        SH=sh,
+        A=A,
+        fft_length=info['fft_length'],
+        diss_length=info['diss_length'],
+        overlap=info['overlap'],
+        fs=info['fs'],
+        speed=info['speed'],
+        T=info['T'],
+        N2=info['N2'],
+        P=info['P'],
+        fit_order=info.get('fit_order', 5),
+        f_AA=info.get('f_AA', 98))
 
     # Extract data for plotting
     K = diss['K']               # Wavenumber array
