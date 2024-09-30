@@ -25,12 +25,8 @@ def get_file():
 
 
 def load_mat_file(filename):
-    """
-    Load the .mat file and extract 'data' and 'dataset' variables.
-    Supports both MATLAB v7.2 and v7.3 formats.
-    """
     try:
-        # Attempt to load using scipy.io.loadmat (supports v7.2 and below)
+        # Attempt to load using scipy.io.loadmat
         mat_contents = scipy.io.loadmat(
             filename, struct_as_record=False, squeeze_me=True)
         data = mat_contents.get('data', None)
@@ -278,6 +274,12 @@ def calculate_dissipation_rate(
         'f_AA': 98,
         'fit_2_Nasmyth': params['fit_2_Nasmyth']
     }
+    handles = {
+        'axes1': plt.subplot(1, 3, 1),
+        'axes2': plt.subplot(1, 3, 2),
+        'axes3': plt.subplot(1, 3, 3),
+        'text14': None  # If you have any text labels to update
+    }
 
     # Calculate dissipation rate
     diss = get_diss_odas_nagai4gui2024(
@@ -286,13 +288,14 @@ def calculate_dissipation_rate(
         fft_length=info['fft_length'],
         diss_length=info['diss_length'],
         overlap=info['overlap'],
-        fs=info['fs'],
-        speed=info['speed'],
-        T=info['T'],
-        N2=info['N2'],
-        P=info['P'],
+        fs=fs_fast,
+        speed=W,
+        T=T,
+        N2=N2_range,
+        P=press,
         fit_order=info.get('fit_order', 5),
-        f_AA=info.get('f_AA', 98))
+        f_AA=info.get('f_AA', 98),
+    )
 
     # Extract data for plotting
     K = diss['K']               # Wavenumber array
@@ -351,20 +354,6 @@ def detect_divergence_point_threshold(K, P_measured, P_Nasmyth, R_threshold=2.0)
     else:
         divergence_index = len(K) - 1  # No divergence detected within range
     return divergence_index
-
-
-def visc35(T):
-    """
-    Calculate the kinematic viscosity of seawater at salinity 35 PSU.
-    """
-    pol = [
-        -1.131311019739306e-11,   # Coefficient for T^3
-        1.199552027472192e-09,   # Coefficient for T^2
-        -5.864346822839289e-08,   # Coefficient for T^1
-        1.828297985908266e-06    # Constant term
-    ]
-    v = np.polyval(pol, T)
-    return v
 
 
 def main():

@@ -244,19 +244,46 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                 Range = K <= 10 ** K_limit
                 e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
 
-                # Continue with variance correction
-                if e_3 > 0:
-                    x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
-                else:
-                    print("Warning: e_3 is zero, cannot compute x_limit.")
-                    x_limit = 0.0  # Error
+                if e_3 <= 0 or not np.isfinite(e_3):
+                    print("Warning: e_3 is zero or invalid, cannot compute x_limit.")
+                    e[column_index] = np.nan
+                    method[column_index] = np.nan
+                    flagi = 0
+                    # Skip further calculations for this probe
+                    continue
+
+                x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
                 x_limit **= (4 / 3)
+
                 variance_resolved = np.tanh(
                     48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
+                if variance_resolved == 0 or not np.isfinite(variance_resolved):
+                    print("Warning: variance_resolved is zero or invalid.")
+                    e[column_index] = np.nan
+                    method[column_index] = np.nan
+                    flagi = 0
+                    continue
+
                 e_new = e_3 / variance_resolved
+                if not np.isfinite(e_new):
+                    print("Warning: e_new is invalid.")
+                    e[column_index] = np.nan
+                    method[column_index] = np.nan
+                    flagi = 0
+                    continue
 
                 # Iterative correction
+                max_iterations = 1000
+                iteration_count = 0
                 while True:
+                    iteration_count += 1
+                    if iteration_count >= max_iterations:
+                        print(
+                            "Warning: Maximum iterations reached without convergence.")
+                        e[column_index] = np.nan
+                        method[column_index] = np.nan
+                        flagi = 0
+                        break
                     x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
                     x_limit **= (4 / 3)
                     variance_resolved = np.tanh(
@@ -267,7 +294,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                         e_3 = e_new
                         break
 
-                # Correct for missing variance at low end
+               # Correct for missing variance at low end
                 phi = nasmyth(e_3, nu, K[1:3])
                 phi = phi[0]
                 e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi
