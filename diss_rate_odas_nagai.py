@@ -243,20 +243,20 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                                        np.log10(150))
                 Range = K <= 10 ** K_limit
                 e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
-                print(f"Shape of shear_spectrum: {shear_spectrum.shape}")
-                print(f"Type of shear_spectrum: {type(shear_spectrum)}")
-                print(f"Shape of K: {K.shape}")
-                print(f"Type of K: {type(K)}")
-                print(f"Shape of Range: {Range.shape}")
-                print(f"Type of Range: {type(Range)}")
+                # print(f"Shape of shear_spectrum: {shear_spectrum.shape}")
+                # print(f"Type of shear_spectrum: {type(shear_spectrum)}")
+                # print(f"Shape of K: {K.shape}")
+                # print(f"Type of K: {type(K)}")
+                # print(f"Shape of Range: {Range.shape}")
+                # print(f"Type of Range: {type(Range)}")
 
-                print(
-                    f"Shape of shear_spectrum[Range]: {shear_spectrum[Range].shape}")
-                print(f"Shape of K[Range]: {K[Range].shape}")
+                # print(
+                #     f"Shape of shear_spectrum[Range]: {shear_spectrum[Range].shape}")
+                # print(f"Shape of K[Range]: {K[Range].shape}")
 
-                print(f"Value of e_3: {e_3}")
-                print(
-                    f"Type of e_3: {type(e_3)}, Shape of e_3: {np.shape(e_3)}")
+                # print(f"Value of e_3: {e_3}")
+                # print(
+                #     f"Type of e_3: {type(e_3)}, Shape of e_3: {np.shape(e_3)}")
 
                 if e_3 == 0 or not np.isfinite(e_3):
                     print("Warning: e_3 is zero or invalid, cannot compute x_limit.")
@@ -266,7 +266,6 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                     # Skip further calculations for this probe
                     continue
 
-                print("Computing x limit: ", e_3)
                 x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
                 x_limit **= (4 / 3)
 
@@ -307,12 +306,22 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                     e_new = e_3 / variance_resolved
                     if e_new / e_old < 1.02:
                         e_3 = e_new
+                        e_3 = float(e_3)
                         break
 
                # Correct for missing variance at low end
-                phi = nasmyth(e_3, nu, K[1:3])
-                phi = phi[0]
-                e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi
+                phi, k = nasmyth(e_3, nu, K[1:3])
+                # phi, k = nasmyth(e_3, nu, K[1])
+
+                print(f"phi: {phi}")
+                print(f"nu {nu}")
+                print(f"k1: {K[1]}")
+                e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
+                if isinstance(e_4, np.ndarray):
+                    e_4 = e_4[0]
+                print(e_3)
+                print(e_4)
+                e_4 = float(e_4)
                 if e_4 / e_3 > 1.1:
                     e_new = e_4 / variance_resolved
                     while True:
@@ -344,8 +353,8 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             Krho = 0.2 * e[column_index] / np.mean(N2[select])
             diss['Krho'][index, column_index] = Krho
             diss['N2'][index, column_index] = np.mean(N2[select])
-            diss['Nasmyth_spec'][index, column_index,
-                                 :] = nasmyth(e[column_index], nu, K)
+            k_phi, _ = nasmyth(e[column_index], nu, K)
+            diss['Nasmyth_spec'][index, column_index, :] = k_phi
             flagood[column_index] = flagi
 
         # Save results

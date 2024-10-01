@@ -87,6 +87,12 @@ def process_profile(data, dataset, params, profile_num=0):
     fs_fast = np.squeeze(data['fs_fast'])
     fs_slow = np.squeeze(data['fs_slow'])
 
+    fs_fast = float(fs_fast)
+    fs_slow = float(fs_slow)
+
+    print(f"fs_fast: {fs_fast}")
+    print(f"fs_slow: {fs_slow}")
+
     # Get the number of profiles
     num_profiles = dataset['P_slow'].shape[1]
     if profile_num >= num_profiles:
@@ -110,17 +116,17 @@ def process_profile(data, dataset, params, profile_num=0):
         raise KeyError(f"Missing expected field in dataset: {e}")
 
     # Print types and shapes of variables
-    print(f"Type of P_slow: {type(P_slow)}, shape: {np.shape(P_slow)}")
-    print(f"Type of JAC_T: {type(JAC_T)}, shape: {np.shape(JAC_T)}")
-    print(f"Type of JAC_C: {type(JAC_C)}, shape: {np.shape(JAC_C)}")
-    print(f"Type of P_fast: {type(P_fast)}, shape: {np.shape(P_fast)}")
-    print(f"Type of W_slow: {type(W_slow)}, shape: {np.shape(W_slow)}")
-    print(f"Type of W_fast: {type(W_fast)}, shape: {np.shape(W_fast)}")
-    print(f"Type of sh1: {type(sh1)}, shape: {np.shape(sh1)}")
-    print(f"Type of sh2: {type(sh2)}, shape: {np.shape(sh2)}")
-    print(f"Type of Ax: {type(Ax)}, shape: {np.shape(Ax)}")
-    print(f"Type of Ay: {type(Ay)}, shape: {np.shape(Ay)}")
-    print(f"Type of T1_fast: {type(T1_fast)}, shape: {np.shape(T1_fast)}")
+    # print(f"Type of P_slow: {type(P_slow)}, shape: {np.shape(P_slow)}")
+    # print(f"Type of JAC_T: {type(JAC_T)}, shape: {np.shape(JAC_T)}")
+    # print(f"Type of JAC_C: {type(JAC_C)}, shape: {np.shape(JAC_C)}")
+    # print(f"Type of P_fast: {type(P_fast)}, shape: {np.shape(P_fast)}")
+    # print(f"Type of W_slow: {type(W_slow)}, shape: {np.shape(W_slow)}")
+    # print(f"Type of W_fast: {type(W_fast)}, shape: {np.shape(W_fast)}")
+    # print(f"Type of sh1: {type(sh1)}, shape: {np.shape(sh1)}")
+    # print(f"Type of sh2: {type(sh2)}, shape: {np.shape(sh2)}")
+    # print(f"Type of Ax: {type(Ax)}, shape: {np.shape(Ax)}")
+    # print(f"Type of Ay: {type(Ay)}, shape: {np.shape(Ay)}")
+    # print(f"Type of T1_fast: {type(T1_fast)}, shape: {np.shape(T1_fast)}")
 
     # Compute derived quantities
     sigma_theta_fast = compute_density(
@@ -148,37 +154,17 @@ def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):
     JAC_T_smooth = moving_average(JAC_T, 50)
     JAC_C_smooth = moving_average(JAC_C, 50)
 
-    print("After moving_average:")
-    print(f"JAC_T_smooth shape: {JAC_T_smooth.shape}")
-    print(f"JAC_C_smooth shape: {JAC_C_smooth.shape}")
-
-    # Check for NaNs
-    print(f"NaNs in JAC_T_smooth: {np.isnan(JAC_T_smooth).sum()}")
-    print(f"NaNs in JAC_C_smooth: {np.isnan(JAC_C_smooth).sum()}")
-    print(f"NaNs in P_slow: {np.isnan(P_slow).sum()}")
-
     # Convert practical salinity to Absolute Salinity
-    # Assuming longitude and latitude are zero
+    # Assuming longitude and latitude are zero //fix
     SA = gsw.SA_from_SP(JAC_C_smooth, P_slow, 0, 0)
     CT = gsw.CT_from_t(SA, JAC_T_smooth, P_slow)
     sigma_theta = gsw.sigma0(SA, CT)
-
-    print("After computing sigma_theta:")
-    print(f"sigma_theta shape: {sigma_theta.shape}")
-    print(f"NaNs in sigma_theta: {np.isnan(sigma_theta).sum()}")
-    print(f"Type of sigma_theta: {type(sigma_theta)}")
 
     # Interpolate to fast sampling rate
     time_slow = np.arange(len(P_slow)) / fs_slow
     time_fast = np.arange(len(P_fast)) / fs_fast
 
-    print(f"time_slow shape: {time_slow.shape}")
-    print(f"time_fast shape: {time_fast.shape}")
-
     # Check lengths
-    print(f"Length of time_slow: {len(time_slow)}")
-    print(f"Length of sigma_theta: {len(sigma_theta)}")
-
     interp_func = interp1d(time_slow, sigma_theta,
                            kind='linear', fill_value='extrapolate')
     sigma_theta_fast = interp_func(time_fast)
