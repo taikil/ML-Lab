@@ -243,8 +243,22 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                                        np.log10(150))
                 Range = K <= 10 ** K_limit
                 e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
+                print(f"Shape of shear_spectrum: {shear_spectrum.shape}")
+                print(f"Type of shear_spectrum: {type(shear_spectrum)}")
+                print(f"Shape of K: {K.shape}")
+                print(f"Type of K: {type(K)}")
+                print(f"Shape of Range: {Range.shape}")
+                print(f"Type of Range: {type(Range)}")
 
-                if e_3 <= 0 or not np.isfinite(e_3):
+                print(
+                    f"Shape of shear_spectrum[Range]: {shear_spectrum[Range].shape}")
+                print(f"Shape of K[Range]: {K[Range].shape}")
+
+                print(f"Value of e_3: {e_3}")
+                print(
+                    f"Type of e_3: {type(e_3)}, Shape of e_3: {np.shape(e_3)}")
+
+                if e_3 == 0 or not np.isfinite(e_3):
                     print("Warning: e_3 is zero or invalid, cannot compute x_limit.")
                     e[column_index] = np.nan
                     method[column_index] = np.nan
@@ -252,6 +266,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                     # Skip further calculations for this probe
                     continue
 
+                print("Computing x limit: ", e_3)
                 x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
                 x_limit **= (4 / 3)
 
@@ -273,7 +288,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                     continue
 
                 # Iterative correction
-                max_iterations = 1000
+                max_iterations = 100
                 iteration_count = 0
                 while True:
                     iteration_count += 1

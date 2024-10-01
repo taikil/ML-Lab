@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 from sklearn.ensemble import RandomForestRegressor
 import gsw  # Gibbs SeaWater Oceanographic Package of TEOS-10
 import matplotlib.pyplot as plt
+import hdf5storage
 from diss_rate_odas_nagai import *
 
 
@@ -26,7 +27,6 @@ def get_file():
 
 def load_mat_file(filename):
     try:
-        # Attempt to load using scipy.io.loadmat
         mat_contents = scipy.io.loadmat(
             filename, struct_as_record=False, squeeze_me=True)
         data = mat_contents.get('data', None)
@@ -34,38 +34,20 @@ def load_mat_file(filename):
 
         if data is None or dataset is None:
             raise ValueError(
-                "The .mat file does not contain 'data' and 'dataset' variables.")
+                "The .mat file does not contain both 'data' and 'dataset' variables.")
 
-        print("Loaded .mat file using scipy.io.loadmat (MATLAB v7.2 or below).")
+        print("Loaded .mat file using scipy.io.loadmat.")
         return data, dataset
     except NotImplementedError:
-        # Fallback to h5py for MATLAB v7.3
-        print("Loading .mat file using h5py (MATLAB v7.3).")
-        with h5py.File(filename, 'r') as f:
-            # Extract 'data' and 'dataset' assuming they are top-level groups
-            if 'data' in f.keys() and 'dataset' in f.keys():
-                data = extract_h5py_group(f['data'], f)
-                dataset = extract_h5py_group(f['dataset'], f)
-            else:
-                raise ValueError(
-                    "The .mat file does not contain 'data' and 'dataset' variables.")
-
-            # Additional debugging: Print structure of 'data' and 'dataset'
-            print("Structure of 'data':")
-            for key in data.keys():
-                if isinstance(data[key], np.ndarray):
-                    print(f"  - {key}: {data[key].shape}")
-                else:
-                    print(f"  - {key}: {type(data[key])}")
-
-            print("Structure of 'dataset':")
-            for key in dataset.keys():
-                if isinstance(dataset[key], np.ndarray):
-                    print(f"  - {key}: {dataset[key].shape}")
-                else:
-                    print(f"  - {key}: {type(dataset[key])}")
-
-            return data, dataset
+        # Fallback to hdf5storage for MATLAB v7.3 files
+        print("Loading .mat file using hdf5storage.")
+        mat_contents = hdf5storage.loadmat(filename)
+        data = mat_contents.get('data', None)
+        dataset = mat_contents.get('dataset', None)
+        if data is None or dataset is None:
+            raise ValueError(
+                "The .mat file does not contain both 'data' and 'dataset' variables.")
+        return data, dataset
 
 
 def extract_h5py_group(group, file_handle):
@@ -97,45 +79,48 @@ def extract_h5py_group(group, file_handle):
     return out
 
 
-def process_profile(data, dataset, params, model=None):
+def process_profile(data, dataset, params, profile_num=0):
     """
     Process the profile data to calculate the dissipation rate.
     """
-    # Use 'data' as the profile data
-    profile = data
+    # Extract sampling frequencies from 'data'
+    fs_fast = np.squeeze(data['fs_fast'])
+    fs_slow = np.squeeze(data['fs_slow'])
 
-    # Extract and squeeze variables with error handling
+    # Get the number of profiles
+    num_profiles = dataset['P_slow'].shape[1]
+    if profile_num >= num_profiles:
+        raise ValueError(
+            f"Profile number {profile_num} exceeds available profiles ({num_profiles}).")
+
+    # Extract variables for the selected profile
     try:
-        P_slow = np.squeeze(profile['P_slow'])
-        JAC_T = np.squeeze(profile['JAC_T'])
-        JAC_C = np.squeeze(profile['JAC_C'])
-        P_fast = np.squeeze(profile['P_fast'])
-        W_slow = np.squeeze(profile['W_slow'])
-        W_fast = np.squeeze(profile['W_fast'])
-        sh1 = np.squeeze(profile['sh1'])
-        sh2 = np.squeeze(profile['sh2'])
-        Ax = np.squeeze(profile['Ax'])
-        Ay = np.squeeze(profile['Ay'])
-        T1_fast = np.squeeze(profile['T1_fast'])
+        P_slow = np.squeeze(dataset['P_slow'][0, profile_num])
+        JAC_T = np.squeeze(dataset['JAC_T'][0, profile_num])
+        JAC_C = np.squeeze(dataset['JAC_C'][0, profile_num])
+        P_fast = np.squeeze(dataset['P_fast'][0, profile_num])
+        W_slow = np.squeeze(dataset['W_slow'][0, profile_num])
+        W_fast = np.squeeze(dataset['W_fast'][0, profile_num])
+        sh1 = np.squeeze(dataset['sh1'][0, profile_num])
+        sh2 = np.squeeze(dataset['sh2'][0, profile_num])
+        Ax = np.squeeze(dataset['Ax'][0, profile_num])
+        Ay = np.squeeze(dataset['Ay'][0, profile_num])
+        T1_fast = np.squeeze(dataset['T1_fast'][0, profile_num])
     except KeyError as e:
-        raise KeyError(f"Missing expected field in profile: {e}")
+        raise KeyError(f"Missing expected field in dataset: {e}")
 
-    print("Shapes of extracted variables after squeezing:")
-    print(f"P_slow: {P_slow.shape}")
-    print(f"JAC_T: {JAC_T.shape}")
-    print(f"JAC_C: {JAC_C.shape}")
-    print(f"P_fast: {P_fast.shape}")
-    print(f"W_slow: {W_slow.shape}")
-    print(f"W_fast: {W_fast.shape}")
-    print(f"sh1: {sh1.shape}")
-    print(f"sh2: {sh2.shape}")
-    print(f"Ax: {Ax.shape}")
-    print(f"Ay: {Ay.shape}")
-    print(f"T1_fast: {T1_fast.shape}")
-
-    # Extract scalar sampling frequencies
-    fs_fast = profile['fs_fast'].item()  # Convert from array to scalar
-    fs_slow = profile['fs_slow'].item()  # Convert from array to scalar
+    # Print types and shapes of variables
+    print(f"Type of P_slow: {type(P_slow)}, shape: {np.shape(P_slow)}")
+    print(f"Type of JAC_T: {type(JAC_T)}, shape: {np.shape(JAC_T)}")
+    print(f"Type of JAC_C: {type(JAC_C)}, shape: {np.shape(JAC_C)}")
+    print(f"Type of P_fast: {type(P_fast)}, shape: {np.shape(P_fast)}")
+    print(f"Type of W_slow: {type(W_slow)}, shape: {np.shape(W_slow)}")
+    print(f"Type of W_fast: {type(W_fast)}, shape: {np.shape(W_fast)}")
+    print(f"Type of sh1: {type(sh1)}, shape: {np.shape(sh1)}")
+    print(f"Type of sh2: {type(sh2)}, shape: {np.shape(sh2)}")
+    print(f"Type of Ax: {type(Ax)}, shape: {np.shape(Ax)}")
+    print(f"Type of Ay: {type(Ay)}, shape: {np.shape(Ay)}")
+    print(f"Type of T1_fast: {type(T1_fast)}, shape: {np.shape(T1_fast)}")
 
     # Compute derived quantities
     sigma_theta_fast = compute_density(
@@ -160,9 +145,17 @@ def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):
     """
     Compute the potential density sigma_theta at the fast sampling rate.
     """
-    # Smooth temperature and conductivity (if needed)
     JAC_T_smooth = moving_average(JAC_T, 50)
     JAC_C_smooth = moving_average(JAC_C, 50)
+
+    print("After moving_average:")
+    print(f"JAC_T_smooth shape: {JAC_T_smooth.shape}")
+    print(f"JAC_C_smooth shape: {JAC_C_smooth.shape}")
+
+    # Check for NaNs
+    print(f"NaNs in JAC_T_smooth: {np.isnan(JAC_T_smooth).sum()}")
+    print(f"NaNs in JAC_C_smooth: {np.isnan(JAC_C_smooth).sum()}")
+    print(f"NaNs in P_slow: {np.isnan(P_slow).sum()}")
 
     # Convert practical salinity to Absolute Salinity
     # Assuming longitude and latitude are zero
@@ -170,9 +163,22 @@ def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):
     CT = gsw.CT_from_t(SA, JAC_T_smooth, P_slow)
     sigma_theta = gsw.sigma0(SA, CT)
 
+    print("After computing sigma_theta:")
+    print(f"sigma_theta shape: {sigma_theta.shape}")
+    print(f"NaNs in sigma_theta: {np.isnan(sigma_theta).sum()}")
+    print(f"Type of sigma_theta: {type(sigma_theta)}")
+
     # Interpolate to fast sampling rate
     time_slow = np.arange(len(P_slow)) / fs_slow
     time_fast = np.arange(len(P_fast)) / fs_fast
+
+    print(f"time_slow shape: {time_slow.shape}")
+    print(f"time_fast shape: {time_fast.shape}")
+
+    # Check lengths
+    print(f"Length of time_slow: {len(time_slow)}")
+    print(f"Length of sigma_theta: {len(sigma_theta)}")
+
     interp_func = interp1d(time_slow, sigma_theta,
                            kind='linear', fill_value='extrapolate')
     sigma_theta_fast = interp_func(time_fast)
@@ -376,10 +382,18 @@ def main():
     FILENAME = get_file()
     data, dataset = load_mat_file(FILENAME)
 
-    diss = process_profile(data, dataset, params)
-
-    # Save the results with profile_num set to 1
-    save_dissipation_rate(diss, params['profile_num'])
+    if isinstance(dataset, (np.ndarray, list)):
+        num_profiles = dataset['P_slow'].shape[1]
+        print(f"Number of profiles in dataset: {num_profiles}")
+        # Loop over all profiles or prompt for specific profile
+        profile_num = int(
+            input(f"Enter profile number to process (0 to {num_profiles - 1}): "))
+        diss = process_profile(data, dataset, params, profile_num)
+        save_dissipation_rate(diss, profile_num)
+    else:
+        # Process single profile
+        diss = process_profile(data, dataset, params)
+        save_dissipation_rate(diss, params.get('profile_num', 1))
 
     print("Processing completed successfully.")
 
