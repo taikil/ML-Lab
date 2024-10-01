@@ -243,20 +243,6 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                                        np.log10(150))
                 Range = K <= 10 ** K_limit
                 e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
-                # print(f"Shape of shear_spectrum: {shear_spectrum.shape}")
-                # print(f"Type of shear_spectrum: {type(shear_spectrum)}")
-                # print(f"Shape of K: {K.shape}")
-                # print(f"Type of K: {type(K)}")
-                # print(f"Shape of Range: {Range.shape}")
-                # print(f"Type of Range: {type(Range)}")
-
-                # print(
-                #     f"Shape of shear_spectrum[Range]: {shear_spectrum[Range].shape}")
-                # print(f"Shape of K[Range]: {K[Range].shape}")
-
-                # print(f"Value of e_3: {e_3}")
-                # print(
-                #     f"Type of e_3: {type(e_3)}, Shape of e_3: {np.shape(e_3)}")
 
                 if e_3 == 0 or not np.isfinite(e_3):
                     print("Warning: e_3 is zero or invalid, cannot compute x_limit.")
@@ -313,14 +299,9 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                 phi, k = nasmyth(e_3, nu, K[1:3])
                 # phi, k = nasmyth(e_3, nu, K[1])
 
-                print(f"phi: {phi}")
-                print(f"nu {nu}")
-                print(f"k1: {K[1]}")
                 e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
                 if isinstance(e_4, np.ndarray):
                     e_4 = e_4[0]
-                print(e_3)
-                print(e_4)
                 e_4 = float(e_4)
                 if e_4 / e_3 > 1.1:
                     e_new = e_4 / variance_resolved

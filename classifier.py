@@ -90,9 +90,6 @@ def process_profile(data, dataset, params, profile_num=0):
     fs_fast = float(fs_fast)
     fs_slow = float(fs_slow)
 
-    print(f"fs_fast: {fs_fast}")
-    print(f"fs_slow: {fs_slow}")
-
     # Get the number of profiles
     num_profiles = dataset['P_slow'].shape[1]
     if profile_num >= num_profiles:
@@ -114,19 +111,6 @@ def process_profile(data, dataset, params, profile_num=0):
         T1_fast = np.squeeze(dataset['T1_fast'][0, profile_num])
     except KeyError as e:
         raise KeyError(f"Missing expected field in dataset: {e}")
-
-    # Print types and shapes of variables
-    # print(f"Type of P_slow: {type(P_slow)}, shape: {np.shape(P_slow)}")
-    # print(f"Type of JAC_T: {type(JAC_T)}, shape: {np.shape(JAC_T)}")
-    # print(f"Type of JAC_C: {type(JAC_C)}, shape: {np.shape(JAC_C)}")
-    # print(f"Type of P_fast: {type(P_fast)}, shape: {np.shape(P_fast)}")
-    # print(f"Type of W_slow: {type(W_slow)}, shape: {np.shape(W_slow)}")
-    # print(f"Type of W_fast: {type(W_fast)}, shape: {np.shape(W_fast)}")
-    # print(f"Type of sh1: {type(sh1)}, shape: {np.shape(sh1)}")
-    # print(f"Type of sh2: {type(sh2)}, shape: {np.shape(sh2)}")
-    # print(f"Type of Ax: {type(Ax)}, shape: {np.shape(Ax)}")
-    # print(f"Type of Ay: {type(Ay)}, shape: {np.shape(Ay)}")
-    # print(f"Type of T1_fast: {type(T1_fast)}, shape: {np.shape(T1_fast)}")
 
     # Compute derived quantities
     sigma_theta_fast = compute_density(
@@ -291,7 +275,7 @@ def calculate_dissipation_rate(
 
     # Extract data for plotting
     K = diss['K']               # Wavenumber array
-    P_sh = diss['sh']         # Measured shear spectra
+    P_sh = diss['sh_clean']         # Measured shear spectra
     epsilon = diss['e']   # Dissipation rate estimates
     P_nas = diss['Nasmyth_spec']       # Nasmyth spectra
 
