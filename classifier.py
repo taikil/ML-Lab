@@ -291,30 +291,44 @@ def calculate_dissipation_rate(
 
     # Extract data for plotting
     K = diss['K']               # Wavenumber array
-    P_sh = diss['P_sh']         # Measured shear spectra
-    epsilon = diss['epsilon']   # Dissipation rate estimates
-    P_nas = diss['P_nas']       # Nasmyth spectra
+    P_sh = diss['sh']         # Measured shear spectra
+    epsilon = diss['e']   # Dissipation rate estimates
+    P_nas = diss['Nasmyth_spec']       # Nasmyth spectra
 
-    # Plot the results
-    for i in range(P_sh.shape[0]):  # Loop over probes
+    selected_row = 0  # You can change this to plot different rows
+
+    num_probes = P_sh.shape[1]
+
+    for probe_index in range(num_probes):
+        K_row = K[selected_row, :]  # Shape: (F_length,)
+        # Extract auto-spectrum for the probe (auto-spectrum is when probe_i == probe_j)
+        P_sh_probe = P_sh[selected_row, probe_index,
+                          probe_index, :]  # Shape: (F_length,)
+        P_nas_probe = P_nas[selected_row, probe_index, :]  # Shape: (F_length,)
+
+        # Handle potential zeros in P_nas_probe to avoid division by zero
+        P_nas_probe_safe = np.where(P_nas_probe == 0, np.nan, P_nas_probe)
+
+        # Detect divergence point
         divergence_index = detect_divergence_point_threshold(
-            K, P_sh[i], P_nas[i], R_threshold=2.0
+            K_row, P_sh_probe, P_nas_probe_safe, R_threshold=2.0
         )
-        K_div = K[divergence_index]
+        K_div = K_row[divergence_index]
 
         plt.figure(figsize=(8, 6))
-        plt.loglog(K, P_sh[i], label='Measured Spectrum')
-        plt.loglog(K, P_nas[i], label='Nasmyth Spectrum')
+        plt.loglog(K_row, P_sh_probe, label='Measured Spectrum')
+        plt.loglog(K_row, P_nas_probe, label='Nasmyth Spectrum')
         plt.axvline(K_div, color='r', linestyle='--', label='Divergence Point')
         plt.xlabel('Wavenumber [cpm]')
         plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
-        plt.title(f'Shear Spectrum - Probe {i+1}')
+        plt.title(
+            f'Shear Spectrum - Probe {probe_index + 1} at Row {selected_row}')
         plt.legend()
         plt.grid(True, which='both', linestyle='--', linewidth=0.5)
         plt.tight_layout()
         plt.show()
 
-    return diss
+        return diss
 
 
 def save_dissipation_rate(diss, profile_num):
