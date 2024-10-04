@@ -1,9 +1,9 @@
 import sys
 import numpy as np
 import scipy.io
-import h5py
 import scipy.signal as signal
 from diss_rate_odas_nagai import *
+from wiener import wiener
 from scipy.signal import butter, filtfilt, medfilt
 from scipy.interpolate import interp1d
 from sklearn.ensemble import RandomForestRegressor
@@ -112,7 +112,7 @@ def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):
 
     # Ensure conductivity is in mS/cm
     # If JAC_C_smooth is in S/m, convert it
-    # JAC_C_smooth = JAC_C_smooth * 10  # Uncomment if needed
+    JAC_C_smooth = JAC_C_smooth * 10  # Uncomment if needed
 
     # Compute Practical Salinity (SP) from conductivity, temperature, and pressure
     SP = gsw.SP_from_C(JAC_C_smooth, JAC_T_smooth, P_slow)
@@ -139,15 +139,17 @@ def compute_buoyancy_frequency(sigma_theta_fast, P_fast):
     """
     Compute the squared buoyancy frequency N2.
     """
-    # Smooth pressure and density
     window_size = 200  # Adjust as needed
     P_fast_smooth = moving_average(P_fast, window_size)
     sigma_theta_smooth = moving_average(sigma_theta_fast, window_size)
-
-    # Compute buoyancy frequency squared
+    sigma_theta_sorted = np.sort(sigma_theta_smooth)
     g = 9.81  # gravitational acceleration
-    db = np.gradient(-g * sigma_theta_smooth / 1025.0)
+    buoyi = -g * sigma_theta_sorted / 1025.0
+
+    # Compute gradients
+    db = np.gradient(buoyi)
     dz = np.gradient(P_fast_smooth)
+
     N2 = -db / dz
     return N2
 
@@ -178,7 +180,7 @@ def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
     """
     Despike and apply high-pass filter to shear data.
     """
-    N = 15  # Number of Wiener filter weights
+    N = 15  # Number of wiener filter weights
 
     # Apply Wiener filter to remove acceleration-coherent noise
     _, sh1_clean = wiener(sh1[n], Ax[n], N)
@@ -233,12 +235,6 @@ def calculate_dissipation_rate(
         'f_AA': 98,
         'fit_2_Nasmyth': params['fit_2_Nasmyth']
     }
-    handles = {
-        'axes1': plt.subplot(1, 3, 1),
-        'axes2': plt.subplot(1, 3, 2),
-        'axes3': plt.subplot(1, 3, 3),
-        'text14': None  # If you have any text labels to update
-    }
 
     # Calculate dissipation rate
     diss = get_diss_odas_nagai4gui2024(
@@ -257,45 +253,52 @@ def calculate_dissipation_rate(
     )
 
     # Extract data for plotting
-    K = diss['K']               # Wavenumber array
-    P_sh = diss['sh_clean']         # Measured shear spectra
-    epsilon = diss['e']   # Dissipation rate estimates
-    P_nas = diss['Nasmyth_spec']       # Nasmyth spectra
-
-    selected_row = 0  # You can change this to plot different rows
-
+    # Wavenumber array, shape: (num_segments, F_length)
+    K = diss['K']
+    # Measured shear spectra, shape: (num_segments, num_probes, num_probes, F_length)
+    P_sh = diss['sh_clean']
+    # Dissipation rate estimates, shape: (num_segments, num_probes)
+    epsilon = diss['e']
+    # Nasmyth spectra, shape: (num_segments, num_probes, F_length)
+    P_nas = diss['Nasmyth_spec']
+    num_segments = diss['e'].shape[0]
     num_probes = P_sh.shape[1]
 
-    for probe_index in range(num_probes):
-        K_row = K[selected_row, :]  # Shape: (F_length,)
-        # Extract auto-spectrum for the probe (auto-spectrum is when probe_i == probe_j)
-        P_sh_probe = P_sh[selected_row, probe_index,
-                          probe_index, :]  # Shape: (F_length,)
-        P_nas_probe = P_nas[selected_row, probe_index, :]  # Shape: (F_length,)
+    for segment_index in range(num_segments):
+        for probe_index in range(num_probes):
+            K_row = K[segment_index, :]  # Shape: (F_length,)
+            # Extract auto-spectrum for the probe (auto-spectrum is when probe_i == probe_j)
+            P_sh_probe = P_sh[segment_index, probe_index,
+                              probe_index, :]  # Shape: (F_length,)
+            P_nas_probe = P_nas[segment_index,
+                                probe_index, :]  # Shape: (F_length,)
+            e_segment_probe = epsilon[segment_index, probe_index]
 
-        # Handle potential zeros in P_nas_probe to avoid division by zero
-        P_nas_probe_safe = np.where(P_nas_probe == 0, np.nan, P_nas_probe)
+            # Handle potential zeros in P_nas_probe to avoid division by zero
+            P_nas_probe_safe = np.where(P_nas_probe == 0, np.nan, P_nas_probe)
 
-        # Detect divergence point
-        divergence_index = detect_divergence_point_threshold(
-            K_row, P_sh_probe, P_nas_probe_safe, R_threshold=2.0
-        )
-        K_div = K_row[divergence_index]
+            # Detect divergence point
+            divergence_index = detect_divergence_point_threshold(
+                K_row, P_sh_probe, P_nas_probe_safe, R_threshold=2.0
+            )
+            K_div = K_row[divergence_index]
 
-        plt.figure(figsize=(8, 6))
-        plt.loglog(K_row, P_sh_probe, label='Measured Spectrum')
-        plt.loglog(K_row, P_nas_probe, label='Nasmyth Spectrum')
-        plt.axvline(K_div, color='r', linestyle='--', label='Divergence Point')
-        plt.xlabel('Wavenumber [cpm]')
-        plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
-        plt.title(
-            f'Shear Spectrum - Probe {probe_index + 1} at Row {selected_row}')
-        plt.legend()
-        plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-        plt.tight_layout()
-        plt.show()
+            # Plotting
+            plt.figure(figsize=(10, 6))
+            plt.loglog(K_row, P_sh_probe, label='Measured Spectrum')
+            plt.loglog(K_row, P_nas_probe, label='Nasmyth Spectrum')
+            plt.axvline(K_div, color='r', linestyle='--',
+                        label='Divergence Point')
+            plt.xlabel('Wavenumber [cpm]')
+            plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
+            plt.title(
+                f'Segment {segment_index + 1}, Probe {probe_index + 1}\nDissipation Rate: {e_segment_probe:.2e} W/kg')
+            plt.legend()
+            plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+            plt.tight_layout()
+            plt.show()
 
-        return diss
+    return diss
 
 
 def save_dissipation_rate(diss, profile_num):
