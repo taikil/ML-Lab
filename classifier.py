@@ -1,13 +1,9 @@
 import sys
 import numpy as np
 import scipy.io
-import scipy.signal as signal
 from diss_rate_odas_nagai import *
-from wiener import wiener
+from helper import *
 from scipy.signal import butter, filtfilt, medfilt
-from scipy.interpolate import interp1d
-from sklearn.ensemble import RandomForestRegressor
-import gsw  # Gibbs SeaWater Oceanographic Package of TEOS-10
 import matplotlib.pyplot as plt
 import hdf5storage
 
@@ -103,64 +99,6 @@ def process_profile(data, dataset, params, profile_num=0):
     return diss
 
 
-def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):
-    """
-    Compute the potential density sigma_theta at the fast sampling rate.
-    """
-    JAC_T_smooth = moving_average(JAC_T, 50)
-    JAC_C_smooth = moving_average(JAC_C, 50)
-
-    # Ensure conductivity is in mS/cm
-    # If JAC_C_smooth is in S/m, convert it
-    JAC_C_smooth = JAC_C_smooth * 10  # Uncomment if needed
-
-    # Compute Practical Salinity (SP) from conductivity, temperature, and pressure
-    SP = gsw.SP_from_C(JAC_C_smooth, JAC_T_smooth, P_slow)
-
-    longitude = np.full_like(P_slow, 135.0)  # Longitude in degrees East
-    latitude = np.full_like(P_slow, 30.0)    # Latitude in degrees North
-
-    SA = gsw.SA_from_SP(SP, P_slow, longitude, latitude)
-    CT = gsw.CT_from_t(SA, JAC_T_smooth, P_slow)
-    sigma_theta = gsw.sigma0(SA, CT)
-
-    # Interpolate to fast sampling rate
-    time_slow = np.arange(len(P_slow)) / fs_slow
-    time_fast = np.arange(len(P_fast)) / fs_fast
-
-    interp_func = interp1d(time_slow, sigma_theta,
-                           kind='linear', fill_value='extrapolate')
-    sigma_theta_fast = interp_func(time_fast)
-
-    return sigma_theta_fast
-
-
-def compute_buoyancy_frequency(sigma_theta_fast, P_fast):
-    """
-    Compute the squared buoyancy frequency N2.
-    """
-    window_size = 200  # Adjust as needed
-    P_fast_smooth = moving_average(P_fast, window_size)
-    sigma_theta_smooth = moving_average(sigma_theta_fast, window_size)
-    sigma_theta_sorted = np.sort(sigma_theta_smooth)
-    g = 9.81  # gravitational acceleration
-    buoyi = -g * sigma_theta_sorted / 1025.0
-
-    # Compute gradients
-    db = np.gradient(buoyi)
-    dz = np.gradient(P_fast_smooth)
-
-    N2 = -db / dz
-    return N2
-
-
-def moving_average(data, window_size):
-    """
-    Compute the moving average of the data.
-    """
-    return np.convolve(data, np.ones(window_size)/window_size, mode='same')
-
-
 def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
     """
     Determine the start and end indices for the profile.
@@ -174,27 +112,6 @@ def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
     n = np.arange(start_index_fast, end_index_fast + 1)
     m = np.arange(start_index_slow, end_index_slow + 1)
     return n, m
-
-
-def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
-    """
-    Despike and apply high-pass filter to shear data.
-    """
-    N = 15  # Number of wiener filter weights
-
-    # Apply Wiener filter to remove acceleration-coherent noise
-    _, sh1_clean = wiener(sh1[n], Ax[n], N)
-    _, sh1_clean = wiener(sh1_clean, Ay[n], N)
-    _, sh2_clean = wiener(sh2[n], Ax[n], N)
-    _, sh2_clean = wiener(sh2_clean, Ay[n], N)
-
-    # High-pass filter
-    HP_cut = params['HP_cut']
-    b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')
-    sh1_HP = filtfilt(b_hp, a_hp, sh1_clean)
-    sh2_HP = filtfilt(b_hp, a_hp, sh2_clean)
-
-    return sh1_HP, sh2_HP
 
 
 def calculate_dissipation_rate(
