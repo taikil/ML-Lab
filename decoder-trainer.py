@@ -44,7 +44,7 @@ def load_input_data(input_filename):
         return data, dataset
 
 
-def load_output_labels(output_filename):
+def load_output_data(output_filename):
     """
     Load output labels from the .mat file.
     """
@@ -117,15 +117,52 @@ def extract_input_features(data, dataset, profile_num=0):
     return input_features
 
 
-def extract_output_labels(diss, profile_num=0):
+# def extract_output_labels(diss):
+#     """
+#     Extract output labels from the dissipation data.
+#     """
+#     # List of variables to extract from 'diss'
+#     output_variables = [
+#         'e', 'K_max', 'warning', 'method', 'Nasmyth_spec', 'sh',
+#         'sh_clean', 'AA', 'UA', 'F', 'K', 'speed', 'nu', 'P', 'T', 'flagood'
+#     ]
+
+#     # Dictionary to store the extracted variables
+#     output_labels = {}
+
+#     for var_name in output_variables:
+#         try:
+#             var_data = getattr(diss, var_name)
+#             # Handle different dimensions
+#             if isinstance(var_data, np.ndarray):
+#                 if var_data.ndim == 2:
+#                     # For 2D arrays (e.g., 101x2), reshape to 1D
+#                     var_profile = var_data.reshape(-1)
+#                 elif var_data.ndim > 2:
+#                     # For higher-dimensional arrays, reshape accordingly
+#                     var_profile = var_data.reshape(
+#                         var_data.shape[0] * var_data.shape[1], -1)
+#                 else:
+#                     var_profile = var_data
+#             else:
+#                 var_profile = var_data  # Scalar or non-array
+
+#             output_labels[var_name] = var_profile
+#         except KeyError:
+#             raise KeyError(
+#                 f"Variable '{var_name}' not found in 'diss' structure.")
+#         except Exception as e:
+#             raise Exception(f"Error extracting variable '{var_name}': {e}")
+
+#     return output_labels
+
+
+def extract_output_labels(diss):
     """
     Extract output labels from the dissipation data for a given profile number.
     """
     # List of variables to extract from 'diss'
-    output_variables = [
-        'e', 'K_max', 'warning', 'method', 'Nasmyth_spec', 'sh',
-        'sh_clean', 'AA', 'UA', 'F', 'K', 'speed', 'nu', 'P', 'T', 'flagood'
-    ]
+    output_variables = ['e', 'K_max', 'Nasmyth_spec']
 
     # Dictionary to store the extracted variables
     output_labels = {}
@@ -134,16 +171,9 @@ def extract_output_labels(diss, profile_num=0):
         try:
             var_data = getattr(diss, var_name)
             if isinstance(var_data, np.ndarray) and var_data.ndim > 1:
-                # Assuming the first dimension corresponds to profiles
-                var_profile = var_data[profile_num]
-            else:
-                var_profile = var_data  # Scalar or 1D array
-
-            # Flatten if necessary
-            if isinstance(var_profile, np.ndarray):
-                var_profile = var_profile.flatten()
-
-            output_labels[var_name] = var_profile
+                print(f"Shape: {var_name} : {var_data.shape}")
+                var_data = var_data.flatten()
+            output_labels[var_name] = var_data
         except AttributeError:
             raise AttributeError(
                 f"Variable '{var_name}' not found in 'diss' structure.")
@@ -159,13 +189,16 @@ def align_input_output(input_features, output_labels):
     """
     # Find the minimum length among input features and all output labels
     num_input_samples = input_features.shape[0]
+    print(f"Input sample len: {num_input_samples}")
     print(f"input_features len: {len(input_features)}")
-    print(f"output features len: {len(output_labels)}")
+    print(f"output features len: {output_labels['e']}")
     min_samples = num_input_samples
 
     # Determine the minimum length across all output labels
     for var_name, var_data in output_labels.items():
         if isinstance(var_data, np.ndarray):
+            print(f"var name! {var_name}")
+            print(f"var data! {var_data}")
             min_samples = min(min_samples, len(var_data))
 
     # Trim input features
@@ -228,80 +261,18 @@ def preprocess_data(input_features, output_labels):
     return input_features_scaled, output_labels, scaler
 
 
-def create_sequences(features, labels_dict, seq_length):
+def create_windowed_dataset(features, labels, window_size, overlap):
+    step_size = window_size - overlap
+    num_samples = len(features)
     X = []
-    y_dict = {key: [] for key in labels_dict.keys()}
-
-    if len(features) <= seq_length:
-        print("Not enough data to create sequences.")
-        return np.array([]), {key: np.array([]) for key in labels_dict.keys()}
-
-    for i in range(len(features) - seq_length):
-        X.append(features[i:i+seq_length])
-        for key in labels_dict.keys():
-            y_dict[key].append(labels_dict[key][i:i+seq_length])
-
-    # Convert lists to arrays
-    X = np.array(X)
-    for key in y_dict.keys():
-        y_dict[key] = np.array(y_dict[key])
-
-    return X, y_dict
-
-
-def build_encoder_decoder_model(num_features, seq_length, output_labels):
-    """
-    Build an encoder-decoder model for sequence-to-sequence prediction with multiple outputs.
-    """
-    # Encoder
-    encoder_inputs = layers.Input(shape=(seq_length, num_features))
-    encoder_lstm = layers.LSTM(128, return_state=True)
-    encoder_outputs, state_h, state_c = encoder_lstm(encoder_inputs)
-    encoder_states = [state_h, state_c]
-
-    # Decoder
-    decoder_inputs = layers.Input(shape=(seq_length, num_features))
-    decoder_lstm = layers.LSTM(128, return_sequences=True)
-    decoder_outputs = decoder_lstm(
-        decoder_inputs, initial_state=encoder_states)
-
-    # Output layers for each output label
-    output_layers = {}
-    for var_name in output_labels.keys():
-        if var_name in ['warning', 'method', 'flagood']:
-            # Categorical variables - use appropriate activation
-            # Assuming binary classification for simplicity
-            output_layer = layers.Dense(
-                seq_length, activation='sigmoid', name=var_name)(decoder_outputs)
-        elif var_name in ['Nasmyth_spec', 'sh', 'sh_clean', 'AA', 'UA', 'F', 'K']:
-            # Complex structures - output appropriate shapes
-            # For now, we'll output a fixed-size vector per time step
-            output_layer = layers.TimeDistributed(
-                layers.Dense(10), name=var_name)(decoder_outputs)
-        else:
-            # Continuous variables - regression output
-            output_layer = layers.TimeDistributed(
-                layers.Dense(1), name=var_name)(decoder_outputs)
-        output_layers[var_name] = output_layer
-
-    # Model
-    model = models.Model([encoder_inputs, decoder_inputs],
-                         list(output_layers.values()))
-
-    # Compile the model with appropriate loss functions
-    losses = {}
-    for var_name in output_labels.keys():
-        if var_name in ['warning', 'method', 'flagood']:
-            # Binary cross-entropy loss for classification
-            losses[var_name] = 'binary_crossentropy'
-        else:
-            # Mean squared error for regression
-            losses[var_name] = 'mse'
-
-    model.compile(optimizer='adam', loss=losses)
-
-    print("Encoder-decoder model with multiple outputs built successfully.")
-    return model
+    y = []
+    for start in range(0, num_samples - window_size + 1, step_size):
+        end = start + window_size
+        X_window = features[start:end]
+        y_window = labels[start:end]
+        X.append(X_window)
+        y.append(np.mean(y_window))  # Use mean dissipation rate in the window
+    return np.array(X), np.array(y)
 
 
 def train_model(model, X_train_enc, X_train_dec, y_train_dict, X_val_enc, X_val_dec, y_val_dict, epochs=20):
@@ -315,76 +286,108 @@ def train_model(model, X_train_enc, X_train_dec, y_train_dict, X_val_enc, X_val_
     print("Model training completed.")
 
 
+def plot(model, history, X_test, y_test):
+    plt.figure()
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.legend()
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.show()
+
+    y_pred = model.predict(X_test)
+
+    plt.figure()
+    plt.scatter(y_test, y_pred)
+    plt.xlabel('Actual Dissipation Rate')
+    plt.ylabel('Predicted Dissipation Rate')
+    plt.title('Actual vs. Predicted Dissipation Rate')
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--')
+    plt.show()
+
+
 def main():
+    # Assuming fs_fast is the sampling frequency from your data
+    params = {
+        'fft_length': 4.0,      # FFT length in seconds (from MATLAB code)
+        'diss_length': 8.0,     # Window length in seconds
+        'overlap': 4.0,         # Overlap length in seconds
+        'profile_num': 0
+    }
 
     input_filename, output_filename = get_input_output_files()
     data, dataset = load_input_data(input_filename)
-    diss = load_output_labels(output_filename)
+    diss = load_output_data(output_filename)
 
+    # Convert to samples
+    fs_fast = float(np.squeeze(data['fs_fast']))
+    params['fs_fast'] = fs_fast
+
+    fft_length_samples = int(params['fft_length'] * params['fs_fast'])
+    diss_length_samples = int(params['diss_length'] * params['fs_fast'])
+    overlap_samples = int(params['overlap'] * params['fs_fast'])
     num_profiles = len(dataset['P_slow'])
 
-    all_input_features = []
-    all_output_labels_list = []
+    input_features = extract_input_features(
+        data, dataset, params['profile_num'])
+    print(input_features)
+    output_labels = extract_output_labels(diss)
 
-    for profile_num in range(num_profiles):
-        input_features = extract_input_features(
-            data, dataset, profile_num)
-        output_labels = extract_output_labels(diss, profile_num)
-
-        input_features_aligned, output_labels_aligned = align_input_output(
-            input_features, output_labels)
-
-        all_input_features.append(input_features_aligned)
-        all_output_labels_list.append(output_labels_aligned)
-
-    # Concatenate all data
-    input_features = np.concatenate(all_input_features, axis=0)
-
-    # Combine all output labels
-    combined_output_labels = {}
-    for var_name in all_output_labels_list[0].keys():
-        combined_output_labels[var_name] = np.concatenate(
-            [output_labels[var_name] for output_labels in all_output_labels_list], axis=0)
+    input_features_aligned, output_labels_aligned = align_input_output(
+        input_features, output_labels)
 
     # Preprocess data
     input_features_scaled, output_labels_preprocessed, scaler = preprocess_data(
-        input_features, combined_output_labels)
+        input_features_aligned, output_labels_aligned)
 
-    # Define sequence length
-    sequence_length = 100  # Adjust as needed
+    #  # Extract the dissipation rate 'e' for further processing
+    output_labels_e = output_labels_preprocessed['e']
 
-    # Create sequences
-    X_sequences, y_sequences_dict = create_sequences(
-        input_features_scaled, output_labels_preprocessed, sequence_length)
+    # Create windowed dataset
+    X_windows, y_windows = create_windowed_dataset(
+        input_features_scaled, output_labels_e, diss_length_samples, overlap_samples)
 
-    # Split data into training, validation, and test sets
-    X_train, X_temp, y_train_dict, y_temp_dict = train_test_split(
-        X_sequences, y_sequences_dict, test_size=0.3, random_state=42)
+    # Expected: (num_windows, window_size, num_features)
+    print("X_windows shape:", X_windows.shape)
+    print("y_windows shape:", y_windows.shape)  # Expected: (num_windows,)
 
-    X_val, X_test, y_val_dict, y_test_dict = train_test_split(
-        X_temp, y_temp_dict, test_size=0.5, random_state=42)
+    # Split data
+    X_train_full, X_test, y_train_full, y_test = train_test_split(
+        X_windows, y_windows, test_size=0.2, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full, test_size=0.25, random_state=42)
 
-    # Prepare decoder inputs (for training, we can use the same inputs as encoder inputs)
-    X_train_dec = X_train
-    X_val_dec = X_val
-    X_test_dec = X_test
+    # Define model
+    model = models.Sequential()
+    model.add(layers.Conv1D(64, 3, activation='relu',
+                            input_shape=(X_train.shape[1], X_train.shape[2])))
+    model.add(layers.MaxPooling1D(2))
+    model.add(layers.Conv1D(128, 3, activation='relu'))
+    model.add(layers.MaxPooling1D(2))
+    model.add(layers.Flatten())
+    model.add(layers.Dense(64, activation='relu'))
+    model.add(layers.Dense(1))
 
-    num_features = X_train.shape[2]
+    # Compile model
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
-    # Build and train model
-    model = build_encoder_decoder_model(
-        num_features, sequence_length, output_labels_preprocessed)
-    train_model(model, X_train, X_train_dec, y_train_dict,
-                X_val, X_val_dec, y_val_dict, epochs=20)
+    # Train model
+    history = model.fit(
+        X_train, y_train,
+        epochs=20,
+        batch_size=32,
+        validation_data=(X_val, y_val)
+    )
 
-    # Evaluate model on test set
-    test_loss = model.evaluate([X_test, X_test_dec], y_test_dict)
-    print(f'Test Loss: {test_loss}')
+    plot(model, history, X_test, y_test)
 
-    # Save the model
-    model.save('encoder_decoder_model_multi_output.h5')
+    # Evaluate model
+    test_loss, test_mae = model.evaluate(X_test, y_test)
+    print(f"Test Loss: {test_loss}, Test MAE: {test_mae}")
 
-    print("Processing completed successfully.")
+    # Save model
+    model.save('dissipation_rate_cnn_model.h5')
 
 
 if __name__ == "__main__":

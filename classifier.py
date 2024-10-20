@@ -2,8 +2,12 @@ import sys
 import numpy as np
 import scipy.io
 from diss_rate_odas_nagai import *
+from get_diss_odas import *
 from helper import *
-from scipy.signal import butter, filtfilt, medfilt
+from keras import models, layers, callbacks
+from scipy.signal import welch
+from scipy.signal.windows import hann
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import hdf5storage
 
@@ -46,7 +50,7 @@ def load_mat_file(filename):
         return data, dataset
 
 
-def process_profile(data, dataset, params, profile_num=0):
+def process_profile(data, dataset, params, profile_num=0, model=None):
     """
     Process the profile data to calculate the dissipation rate.
     """
@@ -72,10 +76,10 @@ def process_profile(data, dataset, params, profile_num=0):
         W_slow = np.squeeze(dataset['W_slow'][0, profile_num])
         W_fast = np.squeeze(dataset['W_fast'][0, profile_num])
         sh1 = np.squeeze(dataset['sh1'][0, profile_num])
-        sh2 = np.squeeze(dataset['sh2'][0, profile_num])
-        Ax = np.squeeze(dataset['Ax'][0, profile_num])
-        Ay = np.squeeze(dataset['Ay'][0, profile_num])
-        T1_fast = np.squeeze(dataset['T1_fast'][0, profile_num])
+        sh2 = np.squeeze(dataset['sh2'][0, i])
+        Ax = np.squeeze(dataset['Ax'][0, i])
+        Ay = np.squeeze(dataset['Ay'][0, i])
+        T1_fast = np.squeeze(dataset['T1_fast'][0, i])
     except KeyError as e:
         raise KeyError(f"Missing expected field in dataset: {e}")
 
@@ -91,10 +95,8 @@ def process_profile(data, dataset, params, profile_num=0):
     sh1_HP, sh2_HP = despike_and_filter_sh(
         sh1, sh2, Ax, Ay, n, fs_fast, params)
 
-    # Prepare data for dissipation rate calculation
     diss = calculate_dissipation_rate(
-        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, n, params, fs_fast
-    )
+        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, n, params, fs_fast, fs_slow, model)
 
     return diss
 
@@ -103,8 +105,6 @@ def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
     """
     Determine the start and end indices for the profile.
     """
-    # Implement logic similar to 'get_profile' in MATLAB code
-    # For simplicity, we'll select the entire range
     start_index_slow = 0
     end_index_slow = len(P_slow) - 1
     start_index_fast = int((fs_fast / fs_slow) * start_index_slow)
@@ -114,108 +114,301 @@ def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
     return n, m
 
 
-def calculate_dissipation_rate(
-    sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, n, params, fs_fast
-):
-    """
-    Calculate the dissipation rate using the processed data.
-    """
-    # Select pressure range
-    P_start = params['P_start']
-    P_end = params['P_end']
-    range_indices = n[(P_fast[n] >= P_start) & (P_fast[n] <= P_end)]
+def compute_shear_spectrum(shear_signal, fs):
+    # Remove mean and apply window function
+    shear_signal_detrended = shear_signal - np.mean(shear_signal)
+    window = hann(len(shear_signal_detrended))
+    shear_windowed = shear_signal_detrended * window
 
-    if len(range_indices) == 0:
-        raise ValueError(
-            "No data points found in the specified pressure range.")
+    # Compute FFT
+    nfft = len(shear_windowed)
+    freq, Pxx = welch(shear_windowed, fs=fs, window='hanning',
+                      nperseg=nfft, noverlap=0, scaling='density')
 
+    # Convert frequency to wavenumber (k = f / W)
+    # W is the fall rate (speed)
+    return freq, Pxx
+
+
+def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, n, params, fs_fast, fs_slow, model):
+    """
+    Calculate the dissipation rate using the CNN-predicted integration range.
+    """
     # Prepare variables
-    sh = np.column_stack((sh1_HP[range_indices], sh2_HP[range_indices]))
-    A = np.column_stack((Ax[range_indices], Ay[range_indices]))
-    press = P_fast[range_indices]
-    W = W_fast[range_indices]
-    T = T1_fast[range_indices]
-    nu = visc35(T)
-    N2_range = N2[range_indices]
+    SH = np.column_stack((sh1_HP, sh2_HP))
+    A = np.column_stack((Ax, Ay))
+    speed = W_fast
+    T = T1_fast
+    P = P_fast
 
-    # Prepare info for dissipation calculation
-    info = {
-        'fft_length': int(params['fft_length'] * fs_fast),
-        'diss_length': int(params['diss_length'] * fs_fast),
-        'overlap': int(params['overlap'] * fs_fast),
-        'fs': fs_fast,
-        'speed': W,
-        'T': T,
-        'P': press,
-        'N2': N2_range,
-        'fit_order': 5,
-        'f_AA': 98,
-        'fit_2_Nasmyth': params['fit_2_Nasmyth']
-    }
+    # Set parameters for dissipation calculation
+    fft_length = int(params['fft_length'] * fs_fast)
+    diss_length = int(params['diss_length'] * fs_fast)
+    overlap = int(params['overlap'] * fs_fast)
+    fit_order = params.get('fit_order', 3)
+    f_AA = params.get('f_AA', 98)
+    fit_2_isr = params.get('fit_2_isr', 1.5e-5)
+    f_limit = params.get('f_limit', np.inf)
 
-    # Calculate dissipation rate
-    diss = get_diss_odas_nagai4gui2024(
-        SH=sh,
+    # Estimate epsilon using get_diss_odas
+    diss = get_diss_odas(
+        shear=SH,
         A=A,
-        fft_length=info['fft_length'],
-        diss_length=info['diss_length'],
-        overlap=info['overlap'],
-        fs=fs_fast,
-        speed=W,
+        fft_length=fft_length,
+        diss_length=diss_length,
+        overlap=overlap,
+        fs_fast=fs_fast,
+        fs_slow=fs_slow,
+        speed=speed,
         T=T,
-        N2=N2_range,
-        P=press,
-        fit_order=info.get('fit_order', 5),
-        f_AA=info.get('f_AA', 98),
+        P=P,
+        fit_order=fit_order,
+        f_AA=f_AA,
+        fit_2_isr=fit_2_isr,
+        f_limit=f_limit
     )
 
-    # Extract data for plotting
-    # Wavenumber array, shape: (num_segments, F_length)
-    K = diss['K']
-    # Measured shear spectra, shape: (num_segments, num_probes, num_probes, F_length)
-    P_sh = diss['sh_clean']
-    # Dissipation rate estimates, shape: (num_segments, num_probes)
-    epsilon = diss['e']
-    # Nasmyth spectra, shape: (num_segments, num_probes, F_length)
-    P_nas = diss['Nasmyth_spec']
-    num_segments = diss['e'].shape[0]
-    num_probes = P_sh.shape[1]
+    # Extract estimated epsilon and integration range
+    epsilon = np.mean(diss['e'])
+    K_max = np.mean(diss['K_max'])
+    K = np.mean(diss['K'], axis=1)
+    P_sh_clean = np.mean(diss['sh_clean'], axis=3)  # Average over estimates
 
-    for segment_index in range(num_segments):
-        for probe_index in range(num_probes):
-            K_row = K[segment_index, :]  # Shape: (F_length,)
-            # Extract auto-spectrum for the probe (auto-spectrum is when probe_i == probe_j)
-            P_sh_probe = P_sh[segment_index, probe_index,
-                              probe_index, :]  # Shape: (F_length,)
-            P_nas_probe = P_nas[segment_index,
-                                probe_index, :]  # Shape: (F_length,)
-            e_segment_probe = epsilon[segment_index, probe_index]
+    # Compute observed shear spectrum (average over probes)
+    P_shear_obs = P_sh_clean[:, 0, 0] + P_sh_clean[:, 1, 1]
+    P_shear_obs /= 2
 
-            # Handle potential zeros in P_nas_probe to avoid division by zero
-            P_nas_probe_safe = np.where(P_nas_probe == 0, np.nan, P_nas_probe)
+    # Prepare input for the CNN
+    k_common = np.linspace(K[0], K[-1], 512)
+    P_shear_interp = np.interp(k_common, K, P_shear_obs)
+    spectrum_input = P_shear_interp.reshape(1, -1, 1)  # Reshape for CNN input
 
-            # Detect divergence point
-            divergence_index = detect_divergence_point_threshold(
-                K_row, P_sh_probe, P_nas_probe_safe, R_threshold=2.0
+    # Predict integration range using the CNN
+    predicted_range = model.predict(spectrum_input)
+    K_min_pred, K_max_pred = predicted_range[0]
+
+    print(
+        f"Predicted Integration Range: K_min={K_min_pred:.2f}, K_max={K_max_pred:.2f}")
+
+    # Validate predicted range
+    K_min_pred = max(K[0], K_min_pred)
+    K_max_pred = min(K[-1], K_max_pred)
+    if K_min_pred >= K_max_pred:
+        print("Invalid predicted integration range. Using default range.")
+        K_min_pred, K_max_pred = K[0], K_max
+
+    # Calculate kinematic viscosity
+    nu = visc35(np.mean(T))
+
+    # Generate the Nasmyth spectrum with the estimated epsilon
+    P_nasmyth = nasmyth_spectrum(k_common, epsilon, nu)
+
+    # Calculate the final dissipation rate using the CNN-predicted integration range
+    idx_integration = np.where(
+        (k_common >= K_min_pred) & (k_common <= K_max_pred))[0]
+    e_final = 7.5 * nu * \
+        np.trapz(P_shear_interp[idx_integration], k_common[idx_integration])
+
+    print(
+        f"Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
+
+    # Optionally plot the spectra
+    plot_spectra(k_common, P_shear_interp, P_nasmyth,
+                 [K_min_pred, K_max_pred], e_final)
+
+    return e_final
+
+
+def train_cnn_model(data, dataset, params):
+    """
+    Train the CNN model to predict the integration range.
+    """
+    # Prepare training data
+    spectra, integration_ranges = prepare_training_data(data, dataset, params)
+
+    print(f"Spectra len: {len(spectra)}")
+    print(f"IR len: {len(integration_ranges)}")
+
+    # Convert lists to numpy arrays
+    X = np.array(spectra)  # Shape: (samples, spectrum_length)
+    y = np.array(integration_ranges)  # Shape: (samples, 2)
+
+    # Reshape X for CNN input
+    X = X.reshape(-1, X.shape[1], 1)
+
+    # Split data into training and validation sets
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    # Create CNN model
+    input_shape = (X.shape[1], 1)
+    model = create_cnn_model(input_shape)
+
+    # Compile the model
+    model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+
+    # Train the model
+    early_stopping = callbacks.EarlyStopping(
+        monitor='val_loss', patience=10)
+    history = model.fit(
+        X_train, y_train,
+        epochs=100,
+        batch_size=32,
+        validation_data=(X_val, y_val),
+        callbacks=[early_stopping]
+    )
+
+    # Optionally, plot training history
+    plot_training_history(history)
+
+    return model
+
+
+def create_cnn_model(input_shape):
+    model = models.Sequential()
+    model.add(layers.Conv1D(64, kernel_size=5,
+              activation='relu', input_shape=input_shape))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling1D(pool_size=2))
+    model.add(layers.Conv1D(128, kernel_size=5, activation='relu'))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling1D(pool_size=2))
+    model.add(layers.Conv1D(256, kernel_size=3, activation='relu'))
+    model.add(layers.BatchNormalization())
+    model.add(layers.GlobalAveragePooling1D())
+    model.add(layers.Dense(128, activation='relu'))
+    # Output layer for predicting integration range (two values)
+    model.add(layers.Dense(2, activation='linear'))
+    return model
+
+
+def prepare_training_data(data, dataset, params):
+    """
+    Prepare training data for the CNN model using existing data.
+    """
+    spectra = []
+    integration_ranges = []
+
+    fs_fast = np.squeeze(data['fs_fast'])
+    fs_slow = np.squeeze(data['fs_slow'])
+
+    fs_fast = float(fs_fast)
+    fs_slow = float(fs_slow)
+
+    num_profiles = len(dataset)
+    print(f"Number of profiles available for training: {num_profiles}")
+
+    for i in range(num_profiles):
+        print(f"Processing profile {i+1}/{num_profiles}")
+
+        # Extract variables for the profile
+        try:
+            P_slow = np.squeeze(dataset['P_slow'][0, i])
+            JAC_T = np.squeeze(dataset['JAC_T'][0, i])
+            JAC_C = np.squeeze(dataset['JAC_C'][0, i])
+            P_fast = np.squeeze(dataset['P_fast'][0, i])
+            W_slow = np.squeeze(dataset['W_slow'][0, i])
+            W_fast = np.squeeze(dataset['W_fast'][0, i])
+            sh1 = np.squeeze(dataset['sh1'][0, i])
+            sh2 = np.squeeze(dataset['sh2'][0, i])
+            Ax = np.squeeze(dataset['Ax'][0, i])
+            Ay = np.squeeze(dataset['Ay'][0, i])
+            T1_fast = np.squeeze(dataset['T1_fast'][0, i])
+        except KeyError as e:
+            print(f"Missing expected field in profile {i+1}: {e}")
+            continue
+
+        # Prepare data for dissipation calculation
+        SH = np.column_stack((sh1, sh2))
+        A = np.column_stack((Ax, Ay))
+        speed = W_fast
+        T = T1_fast
+        P = P_fast
+
+        # Set parameters for dissipation calculation
+        fft_length = int(params['fft_length'] * fs_fast)
+        diss_length = int(params['diss_length'] * fs_fast)
+        overlap = int(params['overlap'] * fs_fast)
+        fit_order = params.get('fit_order', 3)
+        f_AA = params.get('f_AA', 98)
+        fit_2_isr = params.get('fit_2_isr', 1.5e-5)
+        f_limit = params.get('f_limit', np.inf)
+
+        # Call the dissipation calculation function
+        try:
+            diss = get_diss_odas(
+                shear=SH,
+                A=A,
+                fft_length=fft_length,
+                diss_length=diss_length,
+                overlap=overlap,
+                fs_fast=fs_fast,
+                fs_slow=fs_slow,
+                speed=speed,
+                T=T,
+                P=P,
+                fit_order=fit_order,
+                f_AA=f_AA,
+                fit_2_isr=fit_2_isr,
+                f_limit=f_limit
             )
-            K_div = K_row[divergence_index]
+        except Exception as e:
+            print(f"Error processing profile {i+1}: {e}")
+            continue  # Skip this profile if there's an error
 
-            # Plotting
-            plt.figure(figsize=(10, 6))
-            plt.loglog(K_row, P_sh_probe, label='Measured Spectrum')
-            plt.loglog(K_row, P_nas_probe, label='Nasmyth Spectrum')
-            plt.axvline(K_div, color='r', linestyle='--',
-                        label='Divergence Point')
-            plt.xlabel('Wavenumber [cpm]')
-            plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
-            plt.title(
-                f'Segment {segment_index + 1}, Probe {probe_index + 1}\nDissipation Rate: {e_segment_probe:.2e} W/kg')
-            plt.legend()
-            plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-            plt.tight_layout()
-            plt.show()
+        # Extract spectra and integration ranges
+        num_estimates = diss['e'].shape[1]
+        num_probes = SH.shape[1]
+        for index in range(num_estimates):
+            for probe_index in range(num_probes):
+                P_sh_clean = diss['sh_clean'][:,
+                                              probe_index, probe_index, index]
+                K = diss['K'][:, index]
+                epsilon = diss['e'][probe_index, index]
+                K_max = diss['K_max'][probe_index, index]
 
-    return diss
+                # Use K_max as the upper limit of the integration range
+                K_min = K[0]
+                integration_range = [K_min, K_max]
+
+                # Interpolate the spectrum onto a common wavenumber grid
+                k_common = np.linspace(K[0], K[-1], 512)
+                P_shear_interp = np.interp(k_common, K, P_sh_clean)
+
+                # Store the interpolated spectrum and integration range
+                spectra.append(P_shear_interp)
+                integration_ranges.append(integration_range)
+
+    # Convert lists to numpy arrays
+    spectra = np.array(spectra)
+    integration_ranges = np.array(integration_ranges)
+
+    return spectra, integration_ranges
+
+
+def plot_training_history(history):
+    plt.figure(figsize=(10, 4))
+    # Plot loss
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Model Loss')
+    plt.legend()
+
+    # Plot MAE
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['mae'], label='Train MAE')
+    plt.plot(history.history['val_mae'], label='Val MAE')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Absolute Error')
+    plt.title('Model MAE')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
 
 
 def save_dissipation_rate(diss, profile_num):
@@ -227,26 +420,22 @@ def save_dissipation_rate(diss, profile_num):
     print(f"Dissipation rate saved to {filename}")
 
 
-def detect_divergence_point_threshold(K, P_measured, P_Nasmyth, R_threshold=2.0):
-    """
-    Detect divergence point based on a threshold ratio between measured and Nasmyth spectra.
-
-    Parameters:
-    - K: array of wavenumbers
-    - P_measured: array of measured shear spectrum values
-    - P_Nasmyth: array of Nasmyth spectrum values
-    - R_threshold: threshold ratio to determine divergence
-
-    Returns:
-    - divergence_index: index of divergence point in K
-    """
-    ratio = P_measured / P_Nasmyth
-    divergence_indices = np.where(ratio > R_threshold)[0]
-    if len(divergence_indices) > 0:
-        divergence_index = divergence_indices[0]
-    else:
-        divergence_index = len(K) - 1  # No divergence detected within range
-    return divergence_index
+def plot_spectra(k_obs, P_shear_obs, P_nasmyth, best_k_range, best_epsilon):
+    plt.figure(figsize=(10, 6))
+    plt.loglog(k_obs, P_shear_obs, label='Observed Shear Spectrum')
+    plt.loglog(k_obs, P_nasmyth,
+               label=f'Nasmyth Spectrum (ε={best_epsilon:.2e} W/kg)')
+    plt.axvline(best_k_range[0], color='r', linestyle='--',
+                label='Best Integration Range Start')
+    plt.axvline(best_k_range[1], color='g',
+                linestyle='--', label='Best Integration Range End')
+    plt.xlabel('Wavenumber (cpm)')
+    plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
+    plt.title('Shear Spectrum Fit to Nasmyth Spectrum')
+    plt.legend()
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.tight_layout()
+    plt.show()
 
 
 def main():
@@ -259,7 +448,12 @@ def main():
         'fft_length': 4.0,      # FFT length (s)
         'diss_length': 8.0,     # Dissipation length (s)
         'overlap': 4.0,         # Overlap length (s)
-        'fit_2_Nasmyth': 0,     # Fit to Nasmyth spectrum (boolean)
+        'fit_order': 3,         # Order of polynomial fit
+        'f_AA': 98,             # Anti-aliasing filter frequency (Hz)
+        # Threshold for inertial subrange fitting (W/kg)
+        'fit_2_isr': 1.5e-5,
+        # Maximum frequency to use when estimating dissipation (Hz)
+        'f_limit': np.inf,
         'min_duration': 60.0,   # Minimum profile duration (s)
         # Profile number to process (fixed to 1 for naming)
         'profile_num': 1,
@@ -269,18 +463,29 @@ def main():
     FILENAME = get_file()
     data, dataset = load_mat_file(FILENAME)
 
-    if isinstance(dataset, (np.ndarray, list)):
-        num_profiles = dataset['P_slow'].shape[1]
-        print(f"Number of profiles in dataset: {num_profiles}")
-        # Loop over all profiles or prompt for specific profile
-        profile_num = int(
-            input(f"Enter profile number to process (0 to {num_profiles - 1}): "))
-        diss = process_profile(data, dataset, params, profile_num)
-        save_dissipation_rate(diss, profile_num)
-    else:
-        # Process single profile
-        diss = process_profile(data, dataset, params)
-        save_dissipation_rate(diss, params.get('profile_num', 1))
+    # Load or train the CNN model for integration range prediction
+    model_filename = 'diss_cnn_2024.h5'
+    try:
+        # Try to load the pre-trained model
+        model = models.load_model(model_filename)
+        print(f"Loaded pre-trained CNN model from {model_filename}")
+    except (IOError, OSError):
+        # If model file does not exist, train the model
+        print(f"No pre-trained model found. Training a new CNN model.")
+        model = train_cnn_model(data, dataset, params)
+        # Save the trained model
+        model.save(model_filename)
+        print(f"Saved trained CNN model to {model_filename}")
+
+    num_profiles = dataset['P_slow'].shape[1]
+    print(f"Number of profiles in dataset: {num_profiles}")
+    # Loop over all profiles or prompt for specific profile
+    profile_num = int(
+        input(f"Enter profile number to process (0 to {num_profiles - 1}): "))
+
+    diss = process_profile(data, dataset, params, profile_num)
+
+    save_dissipation_rate(diss, profile_num)
 
     print("Processing completed successfully.")
 
