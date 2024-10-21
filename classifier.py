@@ -76,10 +76,10 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
         W_slow = np.squeeze(dataset['W_slow'][0, profile_num])
         W_fast = np.squeeze(dataset['W_fast'][0, profile_num])
         sh1 = np.squeeze(dataset['sh1'][0, profile_num])
-        sh2 = np.squeeze(dataset['sh2'][0, i])
-        Ax = np.squeeze(dataset['Ax'][0, i])
-        Ay = np.squeeze(dataset['Ay'][0, i])
-        T1_fast = np.squeeze(dataset['T1_fast'][0, i])
+        sh2 = np.squeeze(dataset['sh2'][0, profile_num])
+        Ax = np.squeeze(dataset['Ax'][0, profile_num])
+        Ay = np.squeeze(dataset['Ay'][0, profile_num])
+        T1_fast = np.squeeze(dataset['T1_fast'][0, profile_num])
     except KeyError as e:
         raise KeyError(f"Missing expected field in dataset: {e}")
 
@@ -96,7 +96,7 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
         sh1, sh2, Ax, Ay, n, fs_fast, params)
 
     diss = calculate_dissipation_rate(
-        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, n, params, fs_fast, fs_slow, model)
+        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model)
 
     return diss
 
@@ -130,7 +130,7 @@ def compute_shear_spectrum(shear_signal, fs):
     return freq, Pxx
 
 
-def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, n, params, fs_fast, fs_slow, model):
+def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model):
     """
     Calculate the dissipation rate using the CNN-predicted integration range.
     """
@@ -151,22 +151,19 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     f_limit = params.get('f_limit', np.inf)
 
     # Estimate epsilon using get_diss_odas
-    diss = get_diss_odas(
-        shear=SH,
+    diss = get_diss_odas_nagai4gui2024(
+        SH=SH,
         A=A,
         fft_length=fft_length,
         diss_length=diss_length,
         overlap=overlap,
-        fs_fast=fs_fast,
-        fs_slow=fs_slow,
+        fs=fs_fast,
         speed=speed,
         T=T,
+        N2=N2,
         P=P,
         fit_order=fit_order,
-        f_AA=f_AA,
-        fit_2_isr=fit_2_isr,
-        f_limit=f_limit
-    )
+        f_AA=f_AA)
 
     # Extract estimated epsilon and integration range
     epsilon = np.mean(diss['e'])
@@ -296,25 +293,27 @@ def prepare_training_data(data, dataset, params):
     fs_fast = float(fs_fast)
     fs_slow = float(fs_slow)
 
-    num_profiles = len(dataset)
+    num_profiles = dataset.size
+
     print(f"Number of profiles available for training: {num_profiles}")
 
     for i in range(num_profiles):
         print(f"Processing profile {i+1}/{num_profiles}")
+        profile = dataset[0, i]  # Access the i-th profile
 
         # Extract variables for the profile
         try:
-            P_slow = np.squeeze(dataset['P_slow'][0, i])
-            JAC_T = np.squeeze(dataset['JAC_T'][0, i])
-            JAC_C = np.squeeze(dataset['JAC_C'][0, i])
-            P_fast = np.squeeze(dataset['P_fast'][0, i])
-            W_slow = np.squeeze(dataset['W_slow'][0, i])
-            W_fast = np.squeeze(dataset['W_fast'][0, i])
-            sh1 = np.squeeze(dataset['sh1'][0, i])
-            sh2 = np.squeeze(dataset['sh2'][0, i])
-            Ax = np.squeeze(dataset['Ax'][0, i])
-            Ay = np.squeeze(dataset['Ay'][0, i])
-            T1_fast = np.squeeze(dataset['T1_fast'][0, i])
+            P_slow = np.squeeze(profile['P_slow'])
+            JAC_T = np.squeeze(profile['JAC_T'])
+            JAC_C = np.squeeze(profile['JAC_C'])
+            P_fast = np.squeeze(profile['P_fast'])
+            W_slow = np.squeeze(profile['W_slow'])
+            W_fast = np.squeeze(profile['W_fast'])
+            sh1 = np.squeeze(profile['sh1'])
+            sh2 = np.squeeze(profile['sh2'])
+            Ax = np.squeeze(profile['Ax'])
+            Ay = np.squeeze(profile['Ay'])
+            T1_fast = np.squeeze(profile['T1_fast'])
         except KeyError as e:
             print(f"Missing expected field in profile {i+1}: {e}")
             continue
@@ -337,21 +336,19 @@ def prepare_training_data(data, dataset, params):
 
         # Call the dissipation calculation function
         try:
-            diss = get_diss_odas(
-                shear=SH,
+            diss = get_diss_odas_nagai4gui2024(
+                SH=SH,
                 A=A,
                 fft_length=fft_length,
                 diss_length=diss_length,
                 overlap=overlap,
-                fs_fast=fs_fast,
-                fs_slow=fs_slow,
+                fs=fs_fast,
                 speed=speed,
                 T=T,
+                N2=P,
                 P=P,
                 fit_order=fit_order,
                 f_AA=f_AA,
-                fit_2_isr=fit_2_isr,
-                f_limit=f_limit
             )
         except Exception as e:
             print(f"Error processing profile {i+1}: {e}")

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import signal
 from scipy.optimize import minimize_scalar
+from clean_shear_spec import clean
 
 
 def get_diss_odas(shear, A, fft_length, diss_length, overlap, fs_fast, fs_slow,
@@ -115,7 +116,7 @@ def get_diss_odas(shear, A, fft_length, diss_length, overlap, fs_fast, fs_slow,
         A_segment = A[select, :]
 
         # Compute cleaned shear spectrum and other spectra
-        P_sh_clean, AA, P_sh, UA, F = clean_shear_spec(
+        P_sh_clean, AA, P_sh, UA, F = clean(
             A_segment, shear_segment, fft_length, fs_fast)
 
         # Convert frequency spectra to wavenumber spectra
@@ -129,6 +130,10 @@ def get_diss_odas(shear, A, fft_length, diss_length, overlap, fs_fast, fs_slow,
         correction[correction_index] = 1 + (K[correction_index] / 48) ** 2
         P_sh_clean *= W * correction[:, np.newaxis, np.newaxis]
         P_sh *= W * correction[:, np.newaxis, np.newaxis]
+
+        # P_sh_clean: Shape (F_length, num_of_shear) or (1025, 2).
+        # correction: Shape (F_length,) or (1025,).
+        # correction[:, np.newaxis, np.newaxis]: Shape (1025, 1, 1).
 
         # Initialize arrays for dissipation calculations
         e = np.zeros(num_of_shear)
@@ -247,8 +252,6 @@ def clean_shear_spec(A_segment, shear_segment, fft_length, fs_fast):
 
     # Clean the shear spectra using Goodman coherent noise removal
     P_sh_clean = P_sh.copy()
-    # Implement noise removal algorithm as needed
-    # ...
 
     return P_sh_clean, AA, P_sh, UA, F
 

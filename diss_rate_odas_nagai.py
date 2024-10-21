@@ -121,7 +121,8 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             'Invalid size for diss_length - must be greater than 2 * fft_length.')
 
     if SH.shape[0] != A.shape[0] or SH.shape[0] != T.shape[0] or SH.shape[0] != P.shape[0]:
-        raise ValueError('Same number of rows required for SH, A, T, P.')
+        raise ValueError(
+            f"Same number of rows required for SH, A, T, P... SH: {SH.shape[0]}, A: {A.shape[0]}, T: {T.shape[0]}, P: {P.shape[0]}")
 
     if not np.isscalar(speed) and len(speed) != SH.shape[0]:
         raise ValueError(
