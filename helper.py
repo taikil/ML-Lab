@@ -151,7 +151,9 @@ def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
     # High-pass filter
     HP_cut = params['HP_cut']
     b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')
-    sh1_HP = filtfilt(b_hp, a_hp, sh1_clean)
-    sh2_HP = filtfilt(b_hp, a_hp, sh2_clean)
+    padlen = min(20, len(sh1_clean) - 1)
+
+    sh1_HP = filtfilt(b_hp, a_hp, sh1_clean, padlen=padlen)
+    sh2_HP = filtfilt(b_hp, a_hp, sh2_clean, padlen=padlen)
 
     return sh1_HP, sh2_HP

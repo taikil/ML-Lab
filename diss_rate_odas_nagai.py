@@ -126,7 +126,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
 
     if not np.isscalar(speed) and len(speed) != SH.shape[0]:
         raise ValueError(
-            'Speed vector must have the same number of rows as shear')
+            f'Speed vector must have the same number of rows as shear, speed: {len(speed)}')
 
     if diss_length > SH.shape[0]:
         raise ValueError(

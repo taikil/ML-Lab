@@ -89,11 +89,16 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     N2 = compute_buoyancy_frequency(sigma_theta_fast, P_fast)
 
     # Prepare profile indices
-    n, m = get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast)
+    n, m = get_profile_indices(
+        P_fast, P_slow, params, fs_slow, fs_fast)
+
+    nn = np.where((P_fast[n] > params['P_start']) &
+                  (P_fast[n] <= params['P_end']))[0]
+    range1 = n[nn]  # Subset of fast data based on pressure
 
     # Despike and filter shear data
     sh1_HP, sh2_HP = despike_and_filter_sh(
-        sh1, sh2, Ax, Ay, n, fs_fast, params)
+        sh1, sh2, Ax, Ay, range1, fs_fast, params)
 
     diss = calculate_dissipation_rate(
         sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model)
@@ -101,16 +106,15 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     return diss
 
 
-def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
-    """
-    Determine the start and end indices for the profile.
-    """
+def get_profile_indices(P_fast, P_slow, params, fs_slow, fs_fast):
     start_index_slow = 0
     end_index_slow = len(P_slow) - 1
-    start_index_fast = int((fs_fast / fs_slow) * start_index_slow)
-    end_index_fast = int((fs_fast / fs_slow) * end_index_slow)
+    start_index_fast = 0
+    end_index_fast = len(P_fast) - 1
+
     n = np.arange(start_index_fast, end_index_fast + 1)
-    m = np.arange(start_index_slow, end_index_slow + 1)
+    m = np.arange(start_index_slow, int(
+        end_index_fast / (fs_fast / fs_slow)) + 1)
     return n, m
 
 
@@ -461,12 +465,14 @@ def main():
     data, dataset = load_mat_file(FILENAME)
 
     # Load or train the CNN model for integration range prediction
-    model_filename = 'diss_cnn_2024.h5'
+    model_filename = input(
+        f"Enter desired model filename: ")
+    model_filename = f'{model_filename}.keras'
     try:
         # Try to load the pre-trained model
         model = models.load_model(model_filename)
         print(f"Loaded pre-trained CNN model from {model_filename}")
-    except (IOError, OSError):
+    except (IOError, OSError, ValueError):
         # If model file does not exist, train the model
         print(f"No pre-trained model found. Training a new CNN model.")
         model = train_cnn_model(data, dataset, params)
@@ -480,7 +486,7 @@ def main():
     profile_num = int(
         input(f"Enter profile number to process (0 to {num_profiles - 1}): "))
 
-    diss = process_profile(data, dataset, params, profile_num)
+    diss = process_profile(data, dataset, params, profile_num, model)
 
     save_dissipation_rate(diss, profile_num)
 
