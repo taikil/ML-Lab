@@ -136,7 +136,7 @@ def compute_shear_spectrum(shear_signal, fs):
 
 def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model):
     """
-    Calculate the dissipation rate using the CNN-predicted integration range.
+    Calculate the dissipation rate over smaller windows using the CNN-predicted integration range.
     """
     # Prepare variables
     SH = np.column_stack((sh1_HP, sh2_HP))
@@ -151,10 +151,8 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     overlap = int(params['overlap'] * fs_fast)
     fit_order = params.get('fit_order', 3)
     f_AA = params.get('f_AA', 98)
-    fit_2_isr = params.get('fit_2_isr', 1.5e-5)
-    f_limit = params.get('f_limit', np.inf)
 
-    # Estimate epsilon using get_diss_odas
+    # Estimate epsilon using get_diss_odas_nagai4gui2024
     diss = get_diss_odas_nagai4gui2024(
         SH=SH,
         A=A,
@@ -167,57 +165,88 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
         N2=N2,
         P=P,
         fit_order=fit_order,
-        f_AA=f_AA)
+        f_AA=f_AA
+    )
 
-    # Extract estimated epsilon and integration range
-    epsilon = np.mean(diss['e'])
-    K_max = np.mean(diss['K_max'])
-    K = np.mean(diss['K'], axis=1)
-    P_sh_clean = np.mean(diss['sh_clean'], axis=3)  # Average over estimates
+    # Number of estimates (windows)
+    num_estimates = diss['e'].shape[1]
+    num_probes = SH.shape[1]
 
-    # Compute observed shear spectrum (average over probes)
-    P_shear_obs = P_sh_clean[:, 0, 0] + P_sh_clean[:, 1, 1]
-    P_shear_obs /= 2
+    # Initialize lists to store results per window
+    e_final_list = []
+    best_k_range_list = []
+    k_common_list = []
+    P_shear_interp_list = []
+    P_nasmyth_list = []
 
-    # Prepare input for the CNN
-    k_common = np.linspace(K[0], K[-1], 512)
-    P_shear_interp = np.interp(k_common, K, P_shear_obs)
-    spectrum_input = P_shear_interp.reshape(1, -1, 1)  # Reshape for CNN input
+    # Loop over each window
+    for index in range(num_estimates):
+        # For each window, process each probe
+        for probe_index in range(num_probes):
+            # Extract data for this window and probe
+            epsilon = diss['e'][probe_index, index]
+            K_max = diss['K_max'][probe_index, index]
+            K = diss['K'][:, index]
+            P_sh_clean = diss['sh_clean'][:, probe_index, probe_index, index]
 
-    # Predict integration range using the CNN
-    predicted_range = model.predict(spectrum_input)
-    K_min_pred, K_max_pred = predicted_range[0]
+            # Interpolate onto common wavenumber grid
+            k_common = np.linspace(K[0], K[-1], 512)
+            P_shear_interp = np.interp(k_common, K, P_sh_clean)
 
-    print(
-        f"Predicted Integration Range: K_min={K_min_pred:.2f}, K_max={K_max_pred:.2f}")
+            # Prepare input for the CNN
+            spectrum_input = P_shear_interp.reshape(
+                1, -1, 1)  # Reshape for CNN input
 
-    # Validate predicted range
-    K_min_pred = max(K[0], K_min_pred)
-    K_max_pred = min(K[-1], K_max_pred)
-    if K_min_pred >= K_max_pred:
-        print("Invalid predicted integration range. Using default range.")
-        K_min_pred, K_max_pred = K[0], K_max
+            # Predict integration range using the CNN
+            predicted_range = model.predict(spectrum_input)
+            K_min_pred, K_max_pred = predicted_range[0]
 
-    # Calculate kinematic viscosity
-    nu = visc35(np.mean(T))
+            # Validate predicted range
+            K_min_pred = max(K[0], K_min_pred)
+            K_max_pred = min(K[-1], K_max_pred)
+            if K_min_pred >= K_max_pred:
+                print(
+                    f"Invalid predicted integration range at window {index}, probe {probe_index}. Using default range.")
+                K_min_pred, K_max_pred = K[0], K_max
 
-    # Generate the Nasmyth spectrum with the estimated epsilon
-    P_nasmyth = nasmyth_spectrum(k_common, epsilon, nu)
+            # Calculate kinematic viscosity
+            nu = visc35(np.mean(T))
 
-    # Calculate the final dissipation rate using the CNN-predicted integration range
-    idx_integration = np.where(
-        (k_common >= K_min_pred) & (k_common <= K_max_pred))[0]
-    e_final = 7.5 * nu * \
-        np.trapz(P_shear_interp[idx_integration], k_common[idx_integration])
+            # Generate the Nasmyth spectrum with the estimated epsilon
+            P_nasmyth = nasmyth_spectrum(k_common, epsilon, nu)
 
-    print(
-        f"Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
+            # Calculate the final dissipation rate using the CNN-predicted integration range
+            idx_integration = np.where(
+                (k_common >= K_min_pred) & (k_common <= K_max_pred))[0]
+            e_final = 7.5 * nu * \
+                np.trapz(P_shear_interp[idx_integration],
+                         k_common[idx_integration])
 
-    # Optionally plot the spectra
-    plot_spectra(k_common, P_shear_interp, P_nasmyth,
-                 [K_min_pred, K_max_pred], e_final)
+            print(
+                f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
 
-    return e_final
+            # Store the results
+            e_final_list.append(e_final)
+            best_k_range_list.append([K_min_pred, K_max_pred])
+            k_common_list.append(k_common)
+            P_shear_interp_list.append(P_shear_interp)
+            P_nasmyth_list.append(P_nasmyth)
+
+            # Optionally plot the spectra for this window
+            plot_spectra(k_common, P_shear_interp, P_nasmyth,
+                         [K_min_pred, K_max_pred], e_final, window_index=index, probe_index=probe_index)
+
+    diss_results = {
+        'e_final': e_final_list,
+        'best_k_range': best_k_range_list,
+        'k_common': k_common_list,
+        'P_shear_interp': P_shear_interp_list,
+        'P_nasmyth': P_nasmyth_list,
+        'num_estimates': num_estimates,
+        'num_probes': num_probes,
+    }
+
+    return diss_results
 
 
 def train_cnn_model(data, dataset, params):
@@ -412,31 +441,37 @@ def plot_training_history(history):
     plt.show()
 
 
-def save_dissipation_rate(diss, profile_num):
+def save_dissipation_rate(diss_results, profile_num):
     """
     Save the dissipation rate data to a .mat file.
     """
     filename = f'dissrate_profile_{profile_num}.mat'
-    scipy.io.savemat(filename, {'diss': diss})
+    scipy.io.savemat(filename, diss_results)
     print(f"Dissipation rate saved to {filename}")
 
 
-def plot_spectra(k_obs, P_shear_obs, P_nasmyth, best_k_range, best_epsilon):
+def plot_spectra(k_obs, P_shear_obs, P_nasmyth, best_k_range, best_epsilon, window_index=None, probe_index=None):
     plt.figure(figsize=(10, 6))
     plt.loglog(k_obs, P_shear_obs, label='Observed Shear Spectrum')
     plt.loglog(k_obs, P_nasmyth,
                label=f'Nasmyth Spectrum (ε={best_epsilon:.2e} W/kg)')
     plt.axvline(best_k_range[0], color='r', linestyle='--',
-                label='Best Integration Range Start')
+                label='Integration Range Start')
     plt.axvline(best_k_range[1], color='g',
-                linestyle='--', label='Best Integration Range End')
+                linestyle='--', label='Integration Range End')
     plt.xlabel('Wavenumber (cpm)')
     plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
-    plt.title('Shear Spectrum Fit to Nasmyth Spectrum')
+    if window_index is not None and probe_index is not None:
+        plt.title(
+            f'Shear Spectrum Fit (Window {window_index}, Probe {probe_index})')
+    else:
+        plt.title('Shear Spectrum Fit')
     plt.legend()
     plt.grid(True, which='both', linestyle='--', linewidth=0.5)
     plt.tight_layout()
     plt.show()
+    # plt.savefig(f'spectrum_window_{window_index}_probe_{probe_index}.png')
+    plt.close()
 
 
 def main():

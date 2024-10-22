@@ -332,7 +332,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         diss['sh_clean'][index, :, :, :] = P_sh_clean
         diss['sh'][index, :, :, :] = P_sh
         diss['AA'][index, :, :, :] = AA
-        diss['UA'][index, :, :, :] = UA
+        diss['UA'][index, :, :, :] = UA.real
         diss['F'][index, :] = F
         diss['K'][index, :] = K
         diss['speed'][index, 0] = W
