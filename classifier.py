@@ -374,8 +374,8 @@ def prepare_training_data(data, dataset, params):
         overlap = int(params['overlap'] * fs_fast)
         fit_order = params.get('fit_order', 3)
         f_AA = params.get('f_AA', 98)
-        fit_2_isr = params.get('fit_2_isr', 1.5e-5)
-        f_limit = params.get('f_limit', np.inf)
+        # fit_2_isr = params.get('fit_2_isr', 1.5e-5)
+        # f_limit = params.get('f_limit', np.inf)
 
         # Call the dissipation calculation function
         try:
