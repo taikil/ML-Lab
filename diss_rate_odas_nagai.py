@@ -321,8 +321,8 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             Krho = 0.2 * e[column_index] / np.mean(N2[select])
             diss['Krho'][index, column_index] = Krho
             diss['N2'][index, column_index] = np.mean(N2[select])
-            k_phi, _ = nasmyth(e[column_index], nu, K)
-            diss['Nasmyth_spec'][index, column_index, :] = k_phi
+            phi, k = nasmyth(e[column_index], nu, K)
+            diss['Nasmyth_spec'][index, column_index, :] = phi
             flagood[column_index] = flagi
 
         # Save results
@@ -334,7 +334,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         diss['AA'][index, :, :, :] = AA
         diss['UA'][index, :, :, :] = UA.real
         diss['F'][index, :] = F
-        diss['K'][index, :] = K
+        diss['K'][index, :] = k  # K?
         diss['speed'][index, 0] = W
         diss['nu'][index, 0] = nu
         diss['T'][index, 0] = mean_T
