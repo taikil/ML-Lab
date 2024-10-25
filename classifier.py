@@ -184,6 +184,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     print(f"diss['e'] shape: {diss['e'].shape}")
     print(f"diss['K_max'] shape: {diss['K_max'].shape}")
     print(f"diss['K'] shape: {diss['K'].shape}")
+    print(f"diss['K']: {diss['K'][0]}")
     print(f"diss['sh_clean'] shape: {diss['sh_clean'].shape}")
 
     # Loop over each window
@@ -193,11 +194,11 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             # Extract data for this window and probe
             epsilon = diss['e'][index, probe_index]
             K_max = diss['K_max'][index, probe_index]
-            K = diss['K'][index, :] + 1e-10  # Shape: (1025,)
+            K = diss['K'][index, :]   # Shape: (1025,)
             P_sh_clean = diss['sh_clean'][index, probe_index, probe_index, :]
 
             # Interpolate onto common wavenumber grid
-            k_common = np.linspace(K[0], K[-1], 512)
+            k_common = np.linspace(K.min(), K.max(), 512)
             P_shear_interp = np.interp(k_common, K, P_sh_clean)
             P_shear_interp = np.where(
                 P_shear_interp <= 0, 1e-10, P_shear_interp)
@@ -218,10 +219,10 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
                     f"Invalid predicted integration range at window {index}, probe {probe_index}. Using default range.")
                 K_min_pred, K_max_pred = K[0], K_max
 
-            # Calculate kinematic viscosity
+            # kinematic viscosity
             nu = visc35(np.mean(T))
 
-            # Generate the Nasmyth spectrum with the estimated epsilon
+            # Generate the Nasmyth spectrum with epsilon
             P_nasmyth = nasmyth_spectrum(k_common, epsilon, nu)
             P_nasmyth = np.where(P_nasmyth <= 0, 1e-10, P_nasmyth)
 
@@ -235,14 +236,12 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             print(
                 f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
 
-            # Store the results
             e_final_list.append(e_final)
             best_k_range_list.append([K_min_pred, K_max_pred])
             k_common_list.append(k_common)
             P_shear_interp_list.append(P_shear_interp)
             P_nasmyth_list.append(P_nasmyth)
 
-            # Optionally plot the spectra for this window
             plot_spectra(k_common, P_shear_interp, P_nasmyth,
                          [K_min_pred, K_max_pred], e_final, window_index=index, probe_index=probe_index)
 
