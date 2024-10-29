@@ -200,8 +200,6 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             # Interpolate onto common wavenumber grid
             k_common = np.linspace(K.min(), K.max(), 512)
             P_shear_interp = np.interp(k_common, K, P_sh_clean)
-            P_shear_interp = np.where(
-                P_shear_interp <= 0, 1e-10, P_shear_interp)
 
             # Prepare input for the CNN
             spectrum_input = P_shear_interp.reshape(
@@ -223,8 +221,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             nu = visc35(np.mean(T))
 
             # Generate the Nasmyth spectrum with epsilon
-            P_nasmyth = nasmyth_spectrum(k_common, epsilon, nu)
-            P_nasmyth = np.where(P_nasmyth <= 0, 1e-10, P_nasmyth)
+            P_nasmyth, k_nasmyth = nasmyth(epsilon, nu, k_common)
 
             # Calculate the final dissipation rate using the CNN-predicted integration range
             idx_integration = np.where(
@@ -461,7 +458,8 @@ def save_dissipation_rate(diss_results, profile_num):
 
 def plot_spectra(k_obs, P_shear_obs, P_nasmyth, best_k_range, best_epsilon, window_index=None, probe_index=None):
     plt.figure(figsize=(10, 6))
-    plt.loglog(k_obs, P_shear_obs, label='Observed Shear Spectrum')
+    plt.loglog(k_obs, P_shear_obs,
+               label='Observed Shear Spectrum')
     plt.loglog(k_obs, P_nasmyth,
                label=f'Nasmyth Spectrum (ε={best_epsilon:.2e} W/kg)')
     plt.axvline(best_k_range[0], color='r', linestyle='--',
