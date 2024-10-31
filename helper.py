@@ -44,13 +44,16 @@ def wiener(dw_dx, az, N):
     c_az = np.fft.fft(az_padded, axis=0)
     C_az = np.abs(c_az) ** 2
     # Scale to match MATLAB's unscaled IFFT
-    C_az = np.fft.ifft(C_az, axis=0) * n_fft
+    # C_az = np.fft.ifft(C_az, axis=0) * n_fft
+    C_az = np.fft.ifft(C_az, axis=0)
 
     # Calculate biased cross-covariance of dw_dx and az
     dw_dx_padded = np.vstack([dw_dx[:L - N, :], np.zeros((N, n_channels))])
     C_dw_dx = np.fft.fft(dw_dx_padded, axis=0)
+    # C_az_dw_dx = np.fft.ifft(C_dw_dx * np.conj(c_az),
+    #                          axis=0) * n_fft  # Scale to match MATLAB
     C_az_dw_dx = np.fft.ifft(C_dw_dx * np.conj(c_az),
-                             axis=0) * n_fft  # Scale to match MATLAB
+                             axis=0)
 
     # Keep only the first N+1 lags
     C_az = np.real(C_az[:N + 1, :])

@@ -3,6 +3,13 @@ from nasmyth import nasmyth
 from clean_shear_spec import clean
 
 
+# def visc35(T):
+#     # Kinematic viscosity of seawater at 35 PSU (salinity), at temperature T (in degrees Celsius)
+#     # Units: m²/s
+#     nu = 1e-6 * (17.91 - 0.5381*T + 0.00694*T**2)
+#     return nu
+
+
 def visc35(T):
     # Polynomial coefficients (from highest degree to constant term)
     pol = [

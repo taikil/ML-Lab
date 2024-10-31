@@ -2,7 +2,6 @@ import sys
 import numpy as np
 import scipy.io
 from diss_rate_odas_nagai import *
-from get_diss_odas import *
 from helper import *
 from keras import models, layers, callbacks
 from scipy.signal import welch
@@ -198,8 +197,10 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             P_sh_clean = diss['sh_clean'][index, probe_index, probe_index, :]
 
             # Interpolate onto common wavenumber grid
-            k_common = np.linspace(K.min(), K.max(), 512)
-            P_shear_interp = np.interp(k_common, K, P_sh_clean)
+            # k_common = np.linspace(K[0], K[-1], 1024)
+            # P_shear_interp = np.interp(k_common, K, P_sh_clean)
+            k_common = K
+            P_shear_interp = P_sh_clean
 
             # Prepare input for the CNN
             spectrum_input = P_shear_interp.reshape(
@@ -409,7 +410,7 @@ def prepare_training_data(data, dataset, params):
                 integration_range = [K_min, K_max]
 
                 # Interpolate the spectrum onto a common wavenumber grid
-                k_common = np.linspace(K[0], K[-1], 512)
+                k_common = np.linspace(K[0], K[-1], 1024)
                 P_shear_interp = np.interp(k_common, K, P_sh_clean)
 
                 # Store the interpolated spectrum and integration range
@@ -456,18 +457,32 @@ def save_dissipation_rate(diss_results, profile_num):
     print(f"Dissipation rate saved to {filename}")
 
 
+def generate_reference_nasmyth_spectra(K):
+    epsilon_values = np.array([1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10])
+    p00_list = []
+    for e in epsilon_values:
+        P_nasmyth, _ = nasmyth(e, 1e-6, K)
+        p00_list.append(P_nasmyth)
+    return p00_list, K
+
+
 def plot_spectra(k_obs, P_shear_obs, P_nasmyth, best_k_range, best_epsilon, window_index=None, probe_index=None):
     plt.figure(figsize=(10, 6))
-    plt.loglog(k_obs, P_shear_obs,
+    plt.loglog(k_obs, P_shear_obs, linewidth=0.7,
                label='Observed Shear Spectrum')
     plt.loglog(k_obs, P_nasmyth,
                label=f'Nasmyth Spectrum (ε={best_epsilon:.2e} W/kg)')
+    p00_list, k00 = generate_reference_nasmyth_spectra(k_obs)
+    for p00 in p00_list:
+        plt.loglog(k00, p00, 'b--', linewidth=1)
     plt.axvline(best_k_range[0], color='r', linestyle='--',
                 label='Integration Range Start')
     plt.axvline(best_k_range[1], color='g',
                 linestyle='--', label='Integration Range End')
     plt.xlabel('Wavenumber (cpm)')
     plt.ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
+    plt.xlim([1, 1000])
+    plt.ylim([1e-10, 1])
     if window_index is not None and probe_index is not None:
         plt.title(
             f'Shear Spectrum Fit (Window {window_index}, Probe {probe_index})')
