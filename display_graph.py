@@ -34,7 +34,6 @@ def plot_spectra_interactive(spectra_data):
         best_epsilon = data['best_epsilon']
         window_index = data['window_index']
         probe_index = data['probe_index']
-        nu = data['nu']
 
         # Plot observed shear spectrum
         ax.loglog(k_obs, P_shear_obs, linewidth=0.7,
@@ -95,3 +94,27 @@ def generate_reference_nasmyth_spectra(K):
         P_nasmyth, _ = nasmyth(e, 1e-6, K)
         p00_list.append(P_nasmyth)
     return p00_list, K
+
+
+def plot_training_history(history):
+    plt.figure(figsize=(10, 4))
+    # Plot loss
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Model Loss')
+    plt.legend()
+
+    # Plot MAE
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['mae'], label='Train MAE')
+    plt.plot(history.history['val_mae'], label='Val MAE')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Absolute Error')
+    plt.title('Model MAE')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()

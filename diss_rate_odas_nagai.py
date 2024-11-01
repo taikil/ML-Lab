@@ -104,6 +104,7 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
         fit_range = np.zeros_like(K, dtype=bool)
         fit_range[fit_indices] = True
 
+    K_min = K[fit_range][0]
     K_max = K[fit_range][-1]
 
     # Refit after removing outliers
@@ -113,7 +114,7 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
         fit_error = np.mean(np.log10(ratio))
         e *= 10 ** (1.5 * fit_error)
 
-    return e, K_max
+    return e, K_max, K_min
 
 
 def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
@@ -156,6 +157,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
     diss = {}
     num_probes = SH.shape[1]
     diss['e'] = np.zeros((number_of_rows, num_probes))
+    diss['K_min'] = np.zeros_like(diss['e'])
     diss['K_max'] = np.zeros_like(diss['e'])
     diss['method'] = np.zeros_like(diss['e'])
     diss['Nasmyth_spec'] = np.zeros((number_of_rows, num_probes, F_length))
@@ -204,6 +206,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
 
         e = np.zeros(num_probes)
         K_max = np.zeros(num_probes)
+        K_min = np.zeros(num_probes)
         method = np.zeros(num_probes)
         flagood = np.zeros(num_probes)
 
@@ -310,6 +313,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                             e_4 = e_new
                             break
 
+                K_min[column_index] = K[Range][0]
                 K_max[column_index] = K[Range][-1]
                 e[column_index] = e_4
                 method[column_index] = 0
@@ -317,7 +321,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             else:
                 # Use inertial subrange method
                 K_limit = min(K_AA, 150)
-                e_4, K_end = inertial_subrange(
+                e_4, K_end, K_start = inertial_subrange(
                     K, shear_spectrum, e_1, nu, K_limit)
                 K_max[column_index] = K_end
                 e[column_index] = e_4
@@ -334,6 +338,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
 
         # Save results
         diss['e'][index, :] = e
+        diss['K_min'][index, :] = K_min
         diss['K_max'][index, :] = K_max
         diss['method'][index, :] = method
         diss['sh_clean'][index, :, :, :] = P_sh_clean
