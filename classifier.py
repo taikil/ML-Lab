@@ -119,22 +119,6 @@ def get_profile_indices(P_fast, P_slow, params, fs_slow, fs_fast):
     return n, m
 
 
-def compute_shear_spectrum(shear_signal, fs):
-    # Remove mean and apply window function
-    shear_signal_detrended = shear_signal - np.mean(shear_signal)
-    window = hann(len(shear_signal_detrended))
-    shear_windowed = shear_signal_detrended * window
-
-    # Compute FFT
-    nfft = len(shear_windowed)
-    freq, Pxx = welch(shear_windowed, fs=fs, window='hanning',
-                      nperseg=nfft, noverlap=0, scaling='density')
-
-    # Convert frequency to wavenumber (k = f / W)
-    # W is the fall rate (speed)
-    return freq, Pxx
-
-
 def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model):
     """
     Calculate the dissipation rate over smaller windows using the CNN-predicted integration range.
@@ -174,10 +158,10 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     num_probes = SH.shape[1]
 
     print(f"Diss size: {num_estimates}")
+    spectra_data = []
 
     # Loop over each window
     for index in range(num_estimates):
-        # For each window, process each probe
         for probe_index in range(num_probes):
             # Extract data for this window and probe
             epsilon = diss['e'][index, probe_index]
@@ -230,32 +214,29 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             # Update Krho and other derived quantities
             N2_mean = diss['N2'][index, probe_index]
             diss['Krho'][index, probe_index] = 0.2 * epsilon_cnn / N2_mean
+
             print(
                 f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
 
-        spectra_data = []
-        for index in range(num_estimates):
-            for probe_index in range(num_probes):
-                K = diss['K'][index, :]
-                P_sh_clean = diss['sh_clean'][index,
-                                              probe_index, probe_index, :]
-                P_nasmyth = diss['Nasmyth_spec'][index, probe_index, :]
-                epsilon_cnn = diss['e'][index, probe_index]
-                K_min_pred = diss['K_min'][index, probe_index]
-                K_max_pred = diss['K_max'][index, probe_index]
+            K = diss['K'][index, :]
+            P_sh_clean = diss['sh_clean'][index,
+                                          probe_index, probe_index, :]
+            P_nasmyth = diss['Nasmyth_spec'][index, probe_index, :]
+            epsilon_cnn = diss['e'][index, probe_index]
+            K_min_pred = diss['K_min'][index, probe_index]
+            K_max_pred = diss['K_max'][index, probe_index]
 
-                # Prepare data for plotting
-                plot_data = {
-                    'k_obs': K,
-                    'P_shear_obs': P_sh_clean,
-                    'P_nasmyth': P_nasmyth,
-                    'best_k_range': [K_min_pred, K_max_pred],
-                    'best_epsilon': epsilon_cnn,
-                    'window_index': index,
-                    'probe_index': probe_index,
-                    'nu': diss['nu'][index, 0]
-                }
-                spectra_data.append(plot_data)
+            # Prepare data for plotting
+            plot_data = {
+                'k_obs': K,
+                'P_shear_obs': P_sh_clean,
+                'P_nasmyth': P_nasmyth,
+                'best_k_range': [K_min_pred, K_max_pred],
+                'best_epsilon': epsilon_cnn,
+                'window_index': index,
+                'probe_index': probe_index,
+            }
+            spectra_data.append(plot_data)
 
     # Plot the spectra interactively
     plot_spectra_interactive(spectra_data)
