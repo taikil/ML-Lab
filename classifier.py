@@ -222,7 +222,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             nu = visc35(np.mean(T))
 
             # Generate the Nasmyth spectrum with epsilon
-            P_nasmyth, k_nasmyth = nasmyth(epsilon, nu, k_common)
+            P_nasmyth, _ = nasmyth(epsilon, nu, k_common)
 
             # Calculate the final dissipation rate using the CNN-predicted integration range
             idx_integration = np.where(

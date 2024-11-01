@@ -83,13 +83,13 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
 
     # Perform iterative fitting
     for _ in range(3):
-        Nasmyth_values = nasmyth(e, nu, K[fit_range])
+        Nasmyth_values, _ = nasmyth(e, nu, K[fit_range])
         ratio = shear_spectrum[fit_range][1:] / Nasmyth_values[1:]
         fit_error = np.mean(np.log10(ratio))
         e *= 10 ** (1.5 * fit_error)
 
     # Remove outliers (flyers)
-    Nasmyth_values = nasmyth(e, nu, K[fit_range])
+    Nasmyth_values, _ = nasmyth(e, nu, K[fit_range])
     ratio = shear_spectrum[fit_range][1:] / Nasmyth_values[1:]
     fit_error = np.log10(ratio)
     flyers_index = np.where(np.abs(fit_error) > 0.5)[0]
@@ -108,7 +108,7 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
 
     # Refit after removing outliers
     for _ in range(2):
-        Nasmyth_values = nasmyth(e, nu, K[fit_range])
+        Nasmyth_values, _ = nasmyth(e, nu, K[fit_range])
         ratio = shear_spectrum[fit_range][1:] / Nasmyth_values[1:]
         fit_error = np.mean(np.log10(ratio))
         e *= 10 ** (1.5 * fit_error)
