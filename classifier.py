@@ -8,7 +8,9 @@ from scipy.signal import welch
 from scipy.signal.windows import hann
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
 import hdf5storage
+from display_graph import *
 
 
 FILENAME = ''
@@ -179,12 +181,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     k_common_list = []
     P_shear_interp_list = []
     P_nasmyth_list = []
-
-    print(f"diss['e'] shape: {diss['e'].shape}")
-    print(f"diss['K_max'] shape: {diss['K_max'].shape}")
-    print(f"diss['K'] shape: {diss['K'].shape}")
-    print(f"diss['K']: {diss['K'][0]}")
-    print(f"diss['sh_clean'] shape: {diss['sh_clean'].shape}")
+    spectra_data = []
 
     # Loop over each window
     for index in range(num_estimates):
@@ -234,15 +231,27 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             print(
                 f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
 
-            e_final_list.append(e_final)
-            best_k_range_list.append([K_min_pred, K_max_pred])
-            k_common_list.append(k_common)
-            P_shear_interp_list.append(P_shear_interp)
-            P_nasmyth_list.append(P_nasmyth)
+            plot_data = {
+                'k_obs': k_common,
+                'P_shear_obs': P_shear_interp,
+                'P_nasmyth': P_nasmyth,
+                'best_k_range': [K_min_pred, K_max_pred],
+                'best_epsilon': e_final,
+                'window_index': index,
+                'probe_index': probe_index,
+                'nu': nu
+            }
+            spectra_data.append(plot_data)
+            # e_final_list.append(e_final)
+            # best_k_range_list.append([K_min_pred, K_max_pred])
+            # k_common_list.append(k_common)
+            # P_shear_interp_list.append(P_shear_interp)
+            # P_nasmyth_list.append(P_nasmyth)
 
-            plot_spectra(k_common, P_shear_interp, P_nasmyth,
-                         [K_min_pred, K_max_pred], e_final, window_index=index, probe_index=probe_index)
+            # plot_spectra(k_common, P_shear_interp, P_nasmyth,
+            #              [K_min_pred, K_max_pred], e_final, window_index=index, probe_index=probe_index)
 
+    plot_spectra_interactive(spectra_data)
     diss_results = {
         'e_final': e_final_list,
         'best_k_range': best_k_range_list,
