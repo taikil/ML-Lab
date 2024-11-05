@@ -1,3 +1,4 @@
+from keras import models, layers
 import sys
 import numpy as np
 import scipy.io
@@ -173,17 +174,29 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             spectrum_input = P_sh_clean.reshape(
                 1, -1, 1)  # Reshape for CNN input
 
-            # Predict integration range using the CNN
-            predicted_range = model.predict(spectrum_input)
-            K_min_pred, K_max_pred = predicted_range[0]
+            # Generate Nasmyth spectrum with epsilon
+            nu = diss['nu'][index, 0]
+            P_nasmyth, _ = nasmyth(epsilon, nu, K)
 
-            # Validate predicted range
-            K_min_pred = max(K[0], K_min_pred)
-            K_max_pred = min(K[-1], K_max_pred)
-            if K_min_pred >= K_max_pred:
-                print(
-                    f"Invalid predicted integration range at window {index}, probe {probe_index}. Using default range.")
-                K_min_pred, K_max_pred = K[0], K_max
+            # Prepare spectral input
+            # Shape: (spectrum_length, 2)
+            spectrum_input = np.stack((P_sh_clean, P_nasmyth), axis=-1)
+            # Add batch dimension
+            spectrum_input = spectrum_input[np.newaxis, ...]
+
+            # Prepare scalar features
+            scalar_feature = np.array([
+                nu,
+                np.mean(P),
+                np.mean(T),
+                np.mean(diss['N2'][index, probe_index])
+            ])
+            # Add batch dimension
+            scalar_feature = scalar_feature[np.newaxis, :]
+
+            # Predict integration range using the CNN
+            predicted_range = model.predict([spectrum_input, scalar_feature])
+            K_min_pred, K_max_pred = predicted_range[0]
 
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
@@ -249,38 +262,34 @@ def train_cnn_model(data, dataset, params):
     Train the CNN model to predict the integration range.
     """
     # Prepare training data
-    spectra, integration_ranges = prepare_training_data(data, dataset, params)
+    spectra, scalar_features, integration_ranges = prepare_training_data(
+        data, dataset, params)
 
-    print(f"Spectra len: {len(spectra)}")
-    print(f"IR len: {len(integration_ranges)}")
-
-    # Convert lists to numpy arrays
-    X = np.array(spectra)  # Shape: (samples, spectrum_length)
-    y = np.array(integration_ranges)  # Shape: (samples, 2)
-
-    # Reshape X for CNN input
-    X = X.reshape(-1, X.shape[1], 1)
+    print(f"Spectra shape: {spectra.shape}")
+    print(f"Scalar features shape: {scalar_features.shape}")
+    print(f"Integration ranges shape: {integration_ranges.shape}")
 
     # Split data into training and validation sets
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=42
+    X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_train, y_val = train_test_split(
+        spectra, scalar_features, integration_ranges, test_size=0.2, random_state=42
     )
 
     # Create CNN model
-    input_shape = (X.shape[1], 1)
-    model = create_cnn_model(input_shape)
+    # (spectrum_length, num_channels)
+    spectrum_input_shape = (spectra.shape[1], spectra.shape[2])
+    scalar_input_shape = (scalar_features.shape[1],)  # (num_scalar_features,)
+    model = create_cnn_model(spectrum_input_shape, scalar_input_shape)
 
     # Compile the model
     model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
 
     # Train the model
-    early_stopping = callbacks.EarlyStopping(
-        monitor='val_loss', patience=10)
+    early_stopping = callbacks.EarlyStopping(monitor='val_loss', patience=10)
     history = model.fit(
-        X_train, y_train,
+        [X_spectrum_train, X_scalar_train], y_train,
+        validation_data=([X_spectrum_val, X_scalar_val], y_val),
         epochs=100,
         batch_size=32,
-        validation_data=(X_val, y_val),
         callbacks=[early_stopping]
     )
 
@@ -290,21 +299,33 @@ def train_cnn_model(data, dataset, params):
     return model
 
 
-def create_cnn_model(input_shape):
-    model = models.Sequential()
-    model.add(layers.Conv1D(64, kernel_size=5,
-              activation='relu', input_shape=input_shape))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling1D(pool_size=2))
-    model.add(layers.Conv1D(128, kernel_size=5, activation='relu'))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling1D(pool_size=2))
-    model.add(layers.Conv1D(256, kernel_size=3, activation='relu'))
-    model.add(layers.BatchNormalization())
-    model.add(layers.GlobalAveragePooling1D())
-    model.add(layers.Dense(128, activation='relu'))
-    # Output layer for predicting integration range (two values)
-    model.add(layers.Dense(2, activation='linear'))
+def create_cnn_model(spectrum_input_shape, scalar_input_shape):
+    # Spectral Input
+    spectrum_input = layers.Input(
+        shape=spectrum_input_shape, name='spectrum_input')
+    x = layers.Conv1D(64, kernel_size=5, activation='relu')(spectrum_input)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling1D(pool_size=2)(x)
+    x = layers.Conv1D(128, kernel_size=5, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling1D(pool_size=2)(x)
+    x = layers.Conv1D(256, kernel_size=3, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.GlobalAveragePooling1D()(x)
+
+    # Scalar Input
+    scalar_input = layers.Input(shape=scalar_input_shape, name='scalar_input')
+
+    # Combine Features
+    combined = layers.concatenate([x, scalar_input])
+    x = layers.Dense(128, activation='relu')(combined)
+    x = layers.Dense(64, activation='relu')(x)
+
+    # Output Layer
+    output = layers.Dense(2, activation='linear')(x)
+
+    # Define Model
+    model = models.Model(inputs=[spectrum_input, scalar_input], outputs=output)
     return model
 
 
@@ -313,13 +334,11 @@ def prepare_training_data(data, dataset, params):
     Prepare training data for the CNN model using existing data.
     """
     spectra = []
+    scalar_features = []
     integration_ranges = []
 
-    fs_fast = np.squeeze(data['fs_fast'])
-    fs_slow = np.squeeze(data['fs_slow'])
-
-    fs_fast = float(fs_fast)
-    fs_slow = float(fs_slow)
+    fs_fast = float(np.squeeze(data['fs_fast']))
+    fs_slow = float(np.squeeze(data['fs_slow']))
 
     num_profiles = dataset.size
 
@@ -346,12 +365,14 @@ def prepare_training_data(data, dataset, params):
             print(f"Missing expected field in profile {i+1}: {e}")
             continue
 
+        # Prepare data
         SH = np.column_stack((sh1, sh2))
         A = np.column_stack((Ax, Ay))
         speed = W_fast
         T = T1_fast
         P = P_fast
 
+        # Set parameters for dissipation calculation
         fft_length = int(params['fft_length'] * fs_fast)
         diss_length = int(params['diss_length'] * fs_fast)
         overlap = int(params['overlap'] * fs_fast)
@@ -359,6 +380,7 @@ def prepare_training_data(data, dataset, params):
         f_AA = params.get('f_AA', 98)
 
         try:
+            # Calculate dissipation rates
             diss = get_diss_odas_nagai4gui2024(
                 SH=SH,
                 A=A,
@@ -368,7 +390,7 @@ def prepare_training_data(data, dataset, params):
                 fs=fs_fast,
                 speed=speed,
                 T=T,
-                N2=P,
+                N2=P,  # Ensure N2 is correctly computed
                 P=P,
                 fit_order=fit_order,
                 f_AA=f_AA,
@@ -378,33 +400,50 @@ def prepare_training_data(data, dataset, params):
             continue  # Skip this profile if there's an error
 
         # Extract spectra and integration ranges
-        num_estimates = diss['e'].shape[1]
+        num_estimates = diss['e'].shape[0]
         num_probes = SH.shape[1]
         for index in range(num_estimates):
             for probe_index in range(num_probes):
-                P_sh_clean = diss['sh_clean'][:,
-                                              probe_index, probe_index, index]
-                K = diss['K'][:, index]
-                epsilon = diss['e'][probe_index, index]
-                K_max = diss['K_max'][probe_index, index]
+                P_sh_clean = diss['sh_clean'][index,
+                                              probe_index, probe_index, :]
+                K = diss['K'][index, :]  # Wavenumber array
+                epsilon = diss['e'][index, probe_index]
+                K_max = diss['K_max'][index, probe_index]
+                K_min = diss['K_min'][index, probe_index]
 
-                # Use K_max as the upper limit of the integration range
-                K_min = K[0]
+                # Generate Nasmyth spectrum with epsilon
+                nu = diss['nu'][index, 0]
+                P_nasmyth, _ = nasmyth(epsilon, nu, K)
+
+                # Create integration range target
                 integration_range = [K_min, K_max]
 
-                # Interpolate the spectrum onto a common wavenumber grid
-                k_common = np.linspace(K[0], K[-1], 1024)
-                P_shear_interp = np.interp(k_common, K, P_sh_clean)
+                # Stack P_sh_clean and P_nasmyth to create multi-channel input
+                # Shape: (spectrum_length, 2)
+                spectrum_input = np.stack((P_sh_clean, P_nasmyth), axis=-1)
 
-                # Store the interpolated spectrum and integration range
-                spectra.append(P_shear_interp)
+                # Collect scalar features (mean values over the window)
+                scalar_feature = np.array([
+                    nu,
+                    np.mean(P),
+                    np.mean(T),
+                    np.mean(diss['N2'][index, probe_index])
+                ])
+
+                # Store data
+                spectra.append(spectrum_input)
+                scalar_features.append(scalar_feature)
                 integration_ranges.append(integration_range)
 
     # Convert lists to numpy arrays
+    # Shape: (num_samples, spectrum_length, num_channels)
     spectra = np.array(spectra)
-    integration_ranges = np.array(integration_ranges)
+    # Shape: (num_samples, num_scalar_features)
+    scalar_features = np.array(scalar_features)
+    integration_ranges = np.array(
+        integration_ranges)  # Shape: (num_samples, 2)
 
-    return spectra, integration_ranges
+    return spectra, scalar_features, integration_ranges
 
 
 def save_dissipation_rate(diss_results, profile_num):
