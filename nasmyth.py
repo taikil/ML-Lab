@@ -84,6 +84,7 @@ def nasmyth(*args):
 
         if k is None:
             # Generate wavenumber array if not provided
+            N = int(N)
             x = np.logspace(-4, 0, N).reshape(N, 1)  # Shape: (N, 1)
             x = np.tile(x, (1, Ne))                  # Shape: (N, Ne)
             k = x * ks                               # Shape: (N, Ne)
@@ -109,6 +110,7 @@ def nasmyth(*args):
         if len(args) >= 2:
             if np.isscalar(args[1]):
                 N = args[1]
+                N = int(N)
                 k = np.logspace(-4, 0, N)
             else:
                 k = np.atleast_1d(args[1])

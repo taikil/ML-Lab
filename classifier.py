@@ -372,6 +372,10 @@ def prepare_training_data(data, dataset, params):
         T = T1_fast
         P = P_fast
 
+        sigma_theta_fast = compute_density(
+            JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast)
+        N2 = compute_buoyancy_frequency(sigma_theta_fast, P_fast)
+
         # Set parameters for dissipation calculation
         fft_length = int(params['fft_length'] * fs_fast)
         diss_length = int(params['diss_length'] * fs_fast)
@@ -390,7 +394,7 @@ def prepare_training_data(data, dataset, params):
                 fs=fs_fast,
                 speed=speed,
                 T=T,
-                N2=P,  # Ensure N2 is correctly computed
+                N2=N2,
                 P=P,
                 fit_order=fit_order,
                 f_AA=f_AA,
