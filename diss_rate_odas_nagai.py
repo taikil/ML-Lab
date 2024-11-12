@@ -118,7 +118,7 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
 
 
 def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
-                                speed, T, N2, P, fit_order=5, f_AA=98):
+                                speed, T, N2, P, fit_order=5, f_AA=98, K_min_pred=None, K_max_pred=None):
     """
     Calculate dissipation rates over an entire profile.
     """
@@ -140,6 +140,11 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         raise ValueError(
             'Diss_length cannot be longer than the length of the shear vectors')
 
+    if K_min_pred is not None and K_max_pred is not None:
+        use_predicted_ranges = True
+    else:
+        use_predicted_ranges = False
+
     f_AA *= 0.9  # constrain limit to 90% of F_AA
 
     select = np.arange(diss_length)
@@ -152,6 +157,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
     number_of_rows = 1 + \
         int(np.floor((SH.shape[0] - diss_length) / (diss_length - overlap)))
     F_length = 1 + int(np.floor(fft_length / 2))
+    print(f"Number of Estimates total: {F_length}")
 
     # Pre-allocate matrices
     diss = {}
@@ -214,119 +220,151 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         nu = visc35(mean_T)
 
         for column_index in range(num_probes):
-            # Get auto-spectrum
-            if num_probes == 1:
-                shear_spectrum = P_sh_clean.squeeze()
-            else:
-                shear_spectrum = P_sh_clean[column_index, column_index, :]
+            if use_predicted_ranges:
+                # Use the predicted K_min and K_max for this window and probe
+                K_min = K_min_pred[index, column_index]
+                K_max = K_max_pred[index, column_index]
 
-            K_range = K <= 10
-            e_10 = 7.5 * nu * np.trapz(shear_spectrum[K_range], K[K_range])
-            e_1 = e_10 * np.sqrt(1 + a * e_10)
+                # Ensure K_min and K_max are within valid K range
+                K_min = max(K_min, K[0])
+                K_max = min(K_max, K[-1])
 
-            if e_1 < 9e-2:
-                # Use variance method
-                e_2 = e_1
-                K_95 = x_95 * (e_2 / nu ** 3) ** 0.25
-                K_95 = max(K_95, np.finfo(float).eps)  # Non-zero
-                K_limit = fit_in_range(min(K_AA, K_95), [0, 150])
-                valid_shear = K <= K_limit
-                Index_limit = np.sum(valid_shear)
-                y = np.log10(shear_spectrum[1:Index_limit])
-                x = np.log10(K[1:Index_limit])
-                fit_order = int(fit_in_range(fit_order, [3, 8]))
-                if Index_limit > fit_order + 2:
-                    p = np.polyfit(x, y, fit_order)
-                    pd1 = np.polyder(p)
-                    pr1 = np.roots(pd1)
-                    pr1 = pr1[np.isreal(pr1)]
-                    # minima only
-                    pr1 = pr1[np.polyval(np.polyder(pd1), pr1) > 0]
-                    pr1 = pr1[pr1 >= np.log10(10)]
-                    if pr1.size == 0:
-                        pr1 = np.log10(K_95)
-                    else:
-                        pr1 = pr1[0]
-                else:
-                    pr1 = np.log10(K_95)
-                K_limit = fit_in_range(min([pr1, np.log10(K_95), np.log10(K_AA)]),
-                                       [np.log10(10), np.log10(150)],
-                                       np.log10(150))
-                Range = K <= 10 ** K_limit
-                e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
+                # Define the integration range
+                integration_indices = np.where((K >= K_min) & (K <= K_max))[0]
 
-                x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
-                x_limit **= (4 / 3)
-
-                variance_resolved = np.tanh(
-                    48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
-
-                e_new = e_3 / variance_resolved
-                if not np.isfinite(e_new):
-                    print("Warning: e_new is invalid.")
+                if len(integration_indices) == 0:
                     e[column_index] = np.nan
                     method[column_index] = np.nan
                     flagi = 0
                     continue
 
-                # Iterative correction
-                max_iterations = 100
-                iteration_count = 0
-                while True:
-                    iteration_count += 1
-                    if iteration_count >= max_iterations:
-                        print(
-                            "Warning: Maximum iterations reached without convergence.")
+                # Calculate dissipation rate using the predicted range
+                e_final = 7.5 * nu * np.trapz(
+                    shear_spectrum[integration_indices],
+                    K[integration_indices]
+                )
+
+                e[column_index] = e_final
+                K_min[column_index] = K_min
+                K_max[column_index] = K_max
+                # Indicate method used is CNN prediction
+                method[column_index] = 2
+                flagi = 1
+
+            else:
+                # Get auto-spectrum
+                if num_probes == 1:
+                    shear_spectrum = P_sh_clean.squeeze()
+                else:
+                    shear_spectrum = P_sh_clean[column_index, column_index, :]
+
+                K_range = K <= 10
+                e_10 = 7.5 * nu * np.trapz(shear_spectrum[K_range], K[K_range])
+                e_1 = e_10 * np.sqrt(1 + a * e_10)
+
+                if e_1 < 9e-2:
+                    # Use variance method
+                    e_2 = e_1
+                    K_95 = x_95 * (e_2 / nu ** 3) ** 0.25
+                    K_95 = max(K_95, np.finfo(float).eps)  # Non-zero
+                    K_limit = fit_in_range(min(K_AA, K_95), [0, 150])
+                    valid_shear = K <= K_limit
+                    Index_limit = np.sum(valid_shear)
+                    y = np.log10(shear_spectrum[1:Index_limit])
+                    x = np.log10(K[1:Index_limit])
+                    fit_order = int(fit_in_range(fit_order, [3, 8]))
+                    if Index_limit > fit_order + 2:
+                        p = np.polyfit(x, y, fit_order)
+                        pd1 = np.polyder(p)
+                        pr1 = np.roots(pd1)
+                        pr1 = pr1[np.isreal(pr1)]
+                        # minima only
+                        pr1 = pr1[np.polyval(np.polyder(pd1), pr1) > 0]
+                        pr1 = pr1[pr1 >= np.log10(10)]
+                        if pr1.size == 0:
+                            pr1 = np.log10(K_95)
+                        else:
+                            pr1 = pr1[0]
+                    else:
+                        pr1 = np.log10(K_95)
+                    K_limit = fit_in_range(min([pr1, np.log10(K_95), np.log10(K_AA)]),
+                                           [np.log10(10), np.log10(150)],
+                                           np.log10(150))
+                    Range = K <= 10 ** K_limit
+                    e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
+
+                    x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
+                    x_limit **= (4 / 3)
+
+                    variance_resolved = np.tanh(
+                        48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
+
+                    e_new = e_3 / variance_resolved
+                    if not np.isfinite(e_new):
+                        print("Warning: e_new is invalid.")
                         e[column_index] = np.nan
                         method[column_index] = np.nan
                         flagi = 0
-                        break
-                    x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
-                    x_limit **= (4 / 3)
-                    variance_resolved = np.tanh(
-                        48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
-                    e_old = e_new
-                    e_new = e_3 / variance_resolved
-                    if e_new / e_old < 1.02:
-                        e_3 = e_new
-                        e_3 = float(e_3)
-                        break
+                        continue
 
-               # Correct for missing variance at low end
-                phi, k = nasmyth(e_3, nu, K[1:3])
-                # phi, k = nasmyth(e_3, nu, K[1])
-
-                e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
-                if isinstance(e_4, np.ndarray):
-                    e_4 = e_4[0]
-                e_4 = float(e_4)
-                if e_4 / e_3 > 1.1:
-                    e_new = e_4 / variance_resolved
+                    # Iterative correction
+                    max_iterations = 100
+                    iteration_count = 0
                     while True:
+                        iteration_count += 1
+                        if iteration_count >= max_iterations:
+                            print(
+                                "Warning: Maximum iterations reached without convergence.")
+                            e[column_index] = np.nan
+                            method[column_index] = np.nan
+                            flagi = 0
+                            break
                         x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
                         x_limit **= (4 / 3)
                         variance_resolved = np.tanh(
                             48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
                         e_old = e_new
-                        e_new = e_4 / variance_resolved
+                        e_new = e_3 / variance_resolved
                         if e_new / e_old < 1.02:
-                            e_4 = e_new
+                            e_3 = e_new
+                            e_3 = float(e_3)
                             break
 
-                K_min[column_index] = K[Range][0]
-                K_max[column_index] = K[Range][-1]
-                e[column_index] = e_4
-                method[column_index] = 0
-                flagi = 1
-            else:
-                # Use inertial subrange method
-                K_limit = min(K_AA, 150)
-                e_4, K_end, K_start = inertial_subrange(
-                    K, shear_spectrum, e_1, nu, K_limit)
-                K_max[column_index] = K_end
-                e[column_index] = e_4
-                method[column_index] = 1
-                flagi = 1
+                # Correct for missing variance at low end
+                    phi, k = nasmyth(e_3, nu, K[1:3])
+                    # phi, k = nasmyth(e_3, nu, K[1])
+
+                    e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
+                    if isinstance(e_4, np.ndarray):
+                        e_4 = e_4[0]
+                    e_4 = float(e_4)
+                    if e_4 / e_3 > 1.1:
+                        e_new = e_4 / variance_resolved
+                        while True:
+                            x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
+                            x_limit **= (4 / 3)
+                            variance_resolved = np.tanh(
+                                48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
+                            e_old = e_new
+                            e_new = e_4 / variance_resolved
+                            if e_new / e_old < 1.02:
+                                e_4 = e_new
+                                break
+
+                    K_min[column_index] = K[Range][0]
+                    K_max[column_index] = K[Range][-1]
+                    e[column_index] = e_4
+                    method[column_index] = 0
+                    flagi = 1
+                else:
+                    # Use inertial subrange method
+                    K_limit = min(K_AA, 150)
+                    e_4, K_end, K_start = inertial_subrange(
+                        K, shear_spectrum, e_1, nu, K_limit)
+                    K_max[column_index] = K_end
+                    e[column_index] = e_4
+                    method[column_index] = 1
+                    flagi = 1
 
             # Compute Krho
             Krho = 0.2 * e[column_index] / np.mean(N2[select])

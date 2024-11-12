@@ -108,6 +108,32 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     return diss
 
 
+def extract_output_labels(diss):
+    """
+    Extract output labels from the dissipation data for a given profile number.
+    """
+    # List of variables to extract from 'diss'
+    output_variables = ['e', 'K_max', 'Nasmyth_spec']
+
+    # Dictionary to store the extracted variables
+    output_labels = {}
+
+    for var_name in output_variables:
+        try:
+            var_data = getattr(diss, var_name)
+            if isinstance(var_data, np.ndarray) and var_data.ndim > 1:
+                print(f"Shape: {var_name} : {var_data.shape}")
+                var_data = var_data.flatten()
+            output_labels[var_name] = var_data
+        except AttributeError:
+            raise AttributeError(
+                f"Variable '{var_name}' not found in 'diss' structure.")
+        except Exception as e:
+            raise Exception(f"Error extracting variable '{var_name}': {e}")
+
+    return output_labels
+
+
 def get_profile_indices(P_fast, P_slow, params, fs_slow, fs_fast):
     start_index_slow = 0
     end_index_slow = len(P_slow) - 1
@@ -138,7 +164,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     fit_order = params.get('fit_order', 3)
     f_AA = params.get('f_AA', 98)
 
-    # Estimate epsilon using get_diss_odas_nagai4gui2024
+    # Estimate epsilon
     diss = get_diss_odas_nagai4gui2024(
         SH=SH,
         A=A,
@@ -405,6 +431,7 @@ def prepare_training_data(data, dataset, params):
 
         # Extract spectra and integration ranges
         num_estimates = diss['e'].shape[0]
+        print(f"Num estimates training: {num_estimates}")
         num_probes = SH.shape[1]
         for index in range(num_estimates):
             for probe_index in range(num_probes):
