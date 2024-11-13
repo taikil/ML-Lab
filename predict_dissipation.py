@@ -1,17 +1,17 @@
-from keras import models, layers
+from keras import models
 import sys
 import numpy as np
 import scipy.io
 from diss_rate_odas_nagai import *
 from helper import *
-from keras import models, layers, callbacks
+from keras import models
 from scipy.signal import welch
 from scipy.signal.windows import hann
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 import hdf5storage
 from display_graph import *
+from cnn import *
 
 
 FILENAME = ''
@@ -108,12 +108,36 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     return diss
 
 
+def load_output_data(output_filename):
+    """
+    Load output labels from the .mat file.
+    """
+    try:
+        mat_contents = scipy.io.loadmat(
+            output_filename, struct_as_record=False, squeeze_me=True)
+        diss = mat_contents.get('diss', None)
+        if diss is None:
+            raise ValueError(
+                "The output .mat file does not contain 'diss' variable.")
+        print("Output labels loaded successfully.")
+        return diss
+    except NotImplementedError:
+        # Fallback to hdf5storage for MATLAB v7.3 files
+        print("Loading .mat file using hdf5storage.")
+        mat_contents = hdf5storage.loadmat(output_filename)
+        diss = mat_contents.get('diss', None)
+        if diss is None:
+            raise ValueError(
+                "The .mat file does not contain both 'data' and 'dataset' variables.")
+        return diss
+
+
 def extract_output_labels(diss):
     """
     Extract output labels from the dissipation data for a given profile number.
     """
     # List of variables to extract from 'diss'
-    output_variables = ['e', 'K_max', 'Nasmyth_spec']
+    output_variables = ['e', 'K_max', 'Nasmyth_spec', 'flagood']
 
     # Dictionary to store the extracted variables
     output_labels = {}
@@ -123,7 +147,7 @@ def extract_output_labels(diss):
             var_data = getattr(diss, var_name)
             if isinstance(var_data, np.ndarray) and var_data.ndim > 1:
                 print(f"Shape: {var_name} : {var_data.shape}")
-                var_data = var_data.flatten()
+                # var_data = var_data.flatten()
             output_labels[var_name] = var_data
         except AttributeError:
             raise AttributeError(
@@ -283,200 +307,6 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     return diss
 
 
-def train_cnn_model(data, dataset, params):
-    """
-    Train the CNN model to predict the integration range.
-    """
-    # Prepare training data
-    spectra, scalar_features, integration_ranges = prepare_training_data(
-        data, dataset, params)
-
-    print(f"Spectra shape: {spectra.shape}")
-    print(f"Scalar features shape: {scalar_features.shape}")
-    print(f"Integration ranges shape: {integration_ranges.shape}")
-
-    # Split data into training and validation sets
-    X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_train, y_val = train_test_split(
-        spectra, scalar_features, integration_ranges, test_size=0.2, random_state=42
-    )
-
-    # Create CNN model
-    # (spectrum_length, num_channels)
-    spectrum_input_shape = (spectra.shape[1], spectra.shape[2])
-    scalar_input_shape = (scalar_features.shape[1],)  # (num_scalar_features,)
-    model = create_cnn_model(spectrum_input_shape, scalar_input_shape)
-
-    # Compile the model
-    model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
-
-    # Train the model
-    early_stopping = callbacks.EarlyStopping(monitor='val_loss', patience=10)
-    history = model.fit(
-        [X_spectrum_train, X_scalar_train], y_train,
-        validation_data=([X_spectrum_val, X_scalar_val], y_val),
-        epochs=100,
-        batch_size=32,
-        callbacks=[early_stopping]
-    )
-
-    # Optionally, plot training history
-    plot_training_history(history)
-
-    return model
-
-
-def create_cnn_model(spectrum_input_shape, scalar_input_shape):
-    # Spectral Input
-    spectrum_input = layers.Input(
-        shape=spectrum_input_shape, name='spectrum_input')
-    x = layers.Conv1D(64, kernel_size=5, activation='relu')(spectrum_input)
-    x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling1D(pool_size=2)(x)
-    x = layers.Conv1D(128, kernel_size=5, activation='relu')(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling1D(pool_size=2)(x)
-    x = layers.Conv1D(256, kernel_size=3, activation='relu')(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.GlobalAveragePooling1D()(x)
-
-    # Scalar Input
-    scalar_input = layers.Input(shape=scalar_input_shape, name='scalar_input')
-
-    # Combine Features
-    combined = layers.concatenate([x, scalar_input])
-    x = layers.Dense(128, activation='relu')(combined)
-    x = layers.Dense(64, activation='relu')(x)
-
-    # Output Layer
-    output = layers.Dense(2, activation='linear')(x)
-
-    # Define Model
-    model = models.Model(inputs=[spectrum_input, scalar_input], outputs=output)
-    return model
-
-
-def prepare_training_data(data, dataset, params):
-    """
-    Prepare training data for the CNN model using existing data.
-    """
-    spectra = []
-    scalar_features = []
-    integration_ranges = []
-
-    fs_fast = float(np.squeeze(data['fs_fast']))
-    fs_slow = float(np.squeeze(data['fs_slow']))
-
-    num_profiles = dataset.size
-
-    print(f"Number of profiles available for training: {num_profiles}")
-
-    for i in range(num_profiles):
-        print(f"Processing profile {i+1}/{num_profiles}")
-        profile = dataset[0, i]  # Access the i-th profile
-
-        # Extract variables for the profile
-        try:
-            P_slow = np.squeeze(profile['P_slow'])
-            JAC_T = np.squeeze(profile['JAC_T'])
-            JAC_C = np.squeeze(profile['JAC_C'])
-            P_fast = np.squeeze(profile['P_fast'])
-            W_slow = np.squeeze(profile['W_slow'])
-            W_fast = np.squeeze(profile['W_fast'])
-            sh1 = np.squeeze(profile['sh1'])
-            sh2 = np.squeeze(profile['sh2'])
-            Ax = np.squeeze(profile['Ax'])
-            Ay = np.squeeze(profile['Ay'])
-            T1_fast = np.squeeze(profile['T1_fast'])
-        except KeyError as e:
-            print(f"Missing expected field in profile {i+1}: {e}")
-            continue
-
-        # Prepare data
-        SH = np.column_stack((sh1, sh2))
-        A = np.column_stack((Ax, Ay))
-        speed = W_fast
-        T = T1_fast
-        P = P_fast
-
-        sigma_theta_fast = compute_density(
-            JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast)
-        N2 = compute_buoyancy_frequency(sigma_theta_fast, P_fast)
-
-        # Set parameters for dissipation calculation
-        fft_length = int(params['fft_length'] * fs_fast)
-        diss_length = int(params['diss_length'] * fs_fast)
-        overlap = int(params['overlap'] * fs_fast)
-        fit_order = params.get('fit_order', 3)
-        f_AA = params.get('f_AA', 98)
-
-        try:
-            # Calculate dissipation rates
-            diss = get_diss_odas_nagai4gui2024(
-                SH=SH,
-                A=A,
-                fft_length=fft_length,
-                diss_length=diss_length,
-                overlap=overlap,
-                fs=fs_fast,
-                speed=speed,
-                T=T,
-                N2=N2,
-                P=P,
-                fit_order=fit_order,
-                f_AA=f_AA,
-            )
-        except Exception as e:
-            print(f"Error processing profile {i+1}: {e}")
-            continue  # Skip this profile if there's an error
-
-        # Extract spectra and integration ranges
-        num_estimates = diss['e'].shape[0]
-        print(f"Num estimates training: {num_estimates}")
-        num_probes = SH.shape[1]
-        for index in range(num_estimates):
-            for probe_index in range(num_probes):
-                P_sh_clean = diss['sh_clean'][index,
-                                              probe_index, probe_index, :]
-                K = diss['K'][index, :]  # Wavenumber array
-                epsilon = diss['e'][index, probe_index]
-                K_max = diss['K_max'][index, probe_index]
-                K_min = diss['K_min'][index, probe_index]
-
-                # Generate Nasmyth spectrum with epsilon
-                nu = diss['nu'][index, 0]
-                P_nasmyth, _ = nasmyth(epsilon, nu, K)
-
-                # Create integration range target
-                integration_range = [K_min, K_max]
-
-                # Stack P_sh_clean and P_nasmyth to create multi-channel input
-                # Shape: (spectrum_length, 2)
-                spectrum_input = np.stack((P_sh_clean, P_nasmyth), axis=-1)
-
-                # Collect scalar features (mean values over the window)
-                scalar_feature = np.array([
-                    nu,
-                    np.mean(P),
-                    np.mean(T),
-                    np.mean(diss['N2'][index, probe_index])
-                ])
-
-                # Store data
-                spectra.append(spectrum_input)
-                scalar_features.append(scalar_feature)
-                integration_ranges.append(integration_range)
-
-    # Convert lists to numpy arrays
-    # Shape: (num_samples, spectrum_length, num_channels)
-    spectra = np.array(spectra)
-    # Shape: (num_samples, num_scalar_features)
-    scalar_features = np.array(scalar_features)
-    integration_ranges = np.array(
-        integration_ranges)  # Shape: (num_samples, 2)
-
-    return spectra, scalar_features, integration_ranges
-
-
 def save_dissipation_rate(diss_results, profile_num):
     """
     Save the dissipation rate data to a .mat file.
@@ -488,6 +318,7 @@ def save_dissipation_rate(diss_results, profile_num):
 
 
 def main():
+    global FILENAME
     params = {
         'HP_cut': 1.0,          # High-pass filter cutoff frequency (Hz)
         'LP_cut': 10.0,         # Low-pass filter cutoff frequency (Hz)
@@ -510,6 +341,7 @@ def main():
         'P_end': 1000.0         # End pressure (dbar)
     }
     FILENAME = get_file()
+    print(f"Filename used: {FILENAME}")
     data, dataset = load_mat_file(FILENAME)
 
     # Load or train the CNN model for integration range prediction
@@ -532,7 +364,8 @@ def main():
     print(f"Number of profiles in dataset: {num_profiles}")
     # Loop over all profiles or prompt for specific profile
     profile_num = int(
-        input(f"Enter profile number to process (0 to {num_profiles - 1}): "))
+        input(f"Enter profile number to process (1 to {num_profiles}): "))
+    profile_num -= 1
 
     diss = process_profile(data, dataset, params, profile_num, model)
 

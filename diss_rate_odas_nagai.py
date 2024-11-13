@@ -118,7 +118,7 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
 
 
 def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
-                                speed, T, N2, P, fit_order=5, f_AA=98, K_min_pred=None, K_max_pred=None):
+                                speed, T, N2, P, fit_order=5, f_AA=98, K_max_pred=None):
     """
     Calculate dissipation rates over an entire profile.
     """
@@ -140,8 +140,9 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         raise ValueError(
             'Diss_length cannot be longer than the length of the shear vectors')
 
-    if K_min_pred is not None and K_max_pred is not None:
-        use_predicted_ranges = True
+    if K_max_pred is not None:
+        # use_predicted_ranges = True
+        use_predicted_ranges = False
     else:
         use_predicted_ranges = False
 
@@ -222,15 +223,21 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         for column_index in range(num_probes):
             if use_predicted_ranges:
                 # Use the predicted K_min and K_max for this window and probe
-                K_min = K_min_pred[index, column_index]
-                K_max = K_max_pred[index, column_index]
+                K_min_predicted = K_AA  # TEMP
+                K_max_predicted = K_max_pred[index, column_index]
 
                 # Ensure K_min and K_max are within valid K range
-                K_min = max(K_min, K[0])
-                K_max = min(K_max, K[-1])
+                K_min_valid = max(K_min_predicted, K[0])
+                K_max_valid = min(K_max_predicted, K[-1])
+
+                if num_probes == 1:
+                    shear_spectrum = P_sh_clean.squeeze()
+                else:
+                    shear_spectrum = P_sh_clean[column_index, column_index, :]
 
                 # Define the integration range
-                integration_indices = np.where((K >= K_min) & (K <= K_max))[0]
+                integration_indices = np.where(
+                    (K >= K_min_valid) & (K <= K_max_valid))[0]
 
                 if len(integration_indices) == 0:
                     e[column_index] = np.nan
@@ -245,8 +252,8 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                 )
 
                 e[column_index] = e_final
-                K_min[column_index] = K_min
-                K_max[column_index] = K_max
+                K_min[column_index] = K_min_valid
+                K_max[column_index] = K_max_valid
                 # Indicate method used is CNN prediction
                 method[column_index] = 2
                 flagi = 1
@@ -384,7 +391,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         diss['AA'][index, :, :, :] = AA
         diss['UA'][index, :, :, :] = UA.real
         diss['F'][index, :] = F
-        diss['K'][index, :] = k  # K?
+        diss['K'][index, :] = K  # K?
         diss['speed'][index, 0] = W
         diss['nu'][index, 0] = nu
         diss['T'][index, 0] = mean_T

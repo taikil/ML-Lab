@@ -5,7 +5,7 @@ from keras import models, layers
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import hdf5storage
-from classifier import *
+from predict_dissipation import *
 
 
 def get_input_output_files():
