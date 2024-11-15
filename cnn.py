@@ -174,13 +174,18 @@ def create_cnn_model(spectrum_input_shape, scalar_input_shape):
     return model
 
 
-def train_cnn_model(data, dataset, params, filename):
+# TRANSFER LEARNING?
+def train_cnn_model(data, dataset, params, filename, existing_model=None):
     """
     Train the CNN model to predict the integration range.
     """
     # Prepare training data
     spectra, scalar_features, integration_ranges = prepare_training_data(
         data, dataset, params, filename)
+
+    if len(spectra) == 0:
+        print("No training data was collected, there was an error in preparing the data")
+        return
 
     print(f"Spectra shape: {spectra.shape}")
     print(f"Scalar features shape: {scalar_features.shape}")
@@ -191,11 +196,15 @@ def train_cnn_model(data, dataset, params, filename):
         spectra, scalar_features, integration_ranges, test_size=0.2, random_state=42
     )
 
-    # Create CNN model
-    # (spectrum_length, num_channels)
-    spectrum_input_shape = (spectra.shape[1], spectra.shape[2])
-    scalar_input_shape = (scalar_features.shape[1],)  # (num_scalar_features,)
-    model = create_cnn_model(spectrum_input_shape, scalar_input_shape)
+    if existing_model is not None:
+        model = existing_model
+        print("Continuing training of existing model...")
+    else:
+        # Create CNN model
+        spectrum_input_shape = (spectra.shape[1], spectra.shape[2])
+        scalar_input_shape = (scalar_features.shape[1],)
+        model = create_cnn_model(spectrum_input_shape, scalar_input_shape)
+        print("New model created.")
 
     # Compile the model
     model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])

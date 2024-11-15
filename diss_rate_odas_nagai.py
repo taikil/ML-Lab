@@ -206,7 +206,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
 
         index += 1
         select = select + int(diss_length - overlap)
-        if select[-1] >= SH.shape[0]:
+        if select[-1] >= SH.shape[0] or index == number_of_rows:
             break
 
     return diss

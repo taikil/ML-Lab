@@ -339,17 +339,44 @@ def main():
     model_filename = input(
         f"Enter desired model filename: ")
     model_filename = f'{model_filename}.keras'
-    try:
+    while True:
+        choice = input(
+            "Do you want to (1) continue training the existing model, (2) train a new model, or (3) use the existing model without retraining? Enter 1, 2, or 3: ")
+        if choice in ['1', '2', '3']:
+            break
+        else:
+            print("Invalid input. Please enter 1, 2, or 3.")
+
+    if choice == '1':
         # Try to load the pre-trained model
-        model = models.load_model(model_filename)
-        print(f"Loaded pre-trained CNN model from {model_filename}")
-    except (IOError, OSError, ValueError):
-        # If model file does not exist, train the model
-        print(f"No pre-trained model found. Training a new CNN model.")
+        try:
+            model = models.load_model(model_filename)
+            print(f"Loaded existing CNN model from {model_filename}")
+            # Continue training the model
+            model = train_cnn_model(
+                data, dataset, params, FILENAME, existing_model=model)
+            # Save the updated model
+            model.save(model_filename)
+            print(f"Updated CNN model saved to {model_filename}")
+        except (IOError, OSError, ValueError) as e:
+            print(f"Failed to load the model from {model_filename}: {e}")
+            print("Training a new model instead.")
+            model = train_cnn_model(data, dataset, params, FILENAME)
+            model.save(model_filename)
+    elif choice == '2':
+        # Train a new model
+        print("Training a new CNN model.")
         model = train_cnn_model(data, dataset, params, FILENAME)
-        # Save the trained model
         model.save(model_filename)
-        print(f"Saved trained CNN model to {model_filename}")
+        print(f"New CNN model saved to {model_filename}")
+    else:
+        # Use the existing model without retraining
+        try:
+            model = models.load_model(model_filename)
+            print(f"Loaded existing CNN model from {model_filename}")
+        except (IOError, OSError, ValueError) as e:
+            print(f"Failed to load the model from {model_filename}: {e}")
+            sys.exit("Cannot proceed without a valid model.")
 
     num_profiles = dataset['P_slow'].shape[1]
     print(f"Number of profiles in dataset: {num_profiles}")
