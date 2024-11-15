@@ -1,15 +1,16 @@
 from keras import callbacks, layers, models
 from sklearn.model_selection import train_test_split
-from predict_dissipation import FILENAME, extract_output_labels, load_output_data
-from display_graph import nasmyth, np, plot_training_history
-from diss_rate_odas_nagai import get_diss_odas_nagai4gui2024, nasmyth, np
-from helper import compute_buoyancy_frequency, compute_density, np
+from predict_dissipation import extract_output_labels, load_output_data
+from display_graph import nasmyth, plot_training_history
+from diss_rate_odas_nagai import get_diss_odas_nagai4gui2024, nasmyth
+from helper import compute_buoyancy_frequency, compute_density
+import numpy as np
 
 
 import numpy as np
 
 
-def prepare_training_data(data, dataset, params):
+def prepare_training_data(data, dataset, params, filename):
     """
     Prepare training data for the CNN model using existing data.
     """
@@ -28,12 +29,11 @@ def prepare_training_data(data, dataset, params):
         print(f"Processing profile {i+1}/{num_profiles}")
         profile = dataset[0, i]  # Access the i-th profile
         # DAT_00n_dissrate_0nn.mat
-        training_file = f"{FILENAME[:-4]}_dissrate_{i+1:03d}.mat"
+        training_file = f"{filename[:-4]}_dissrate_{i+1:03d}.mat"
         print(f"Training File: {training_file}")
         diss_data = load_output_data(training_file)
         training_labels = extract_output_labels(diss_data)
         print(training_labels['K_max'].shape)
-        print(f"Training with file {training_file}")
         pred_K_max = training_labels['K_max']
 
         # Extract variables for the profile
@@ -114,6 +114,10 @@ def prepare_training_data(data, dataset, params):
 
                 # Stack P_sh_clean and P_nasmyth to create multi-channel input
                 # Shape: (spectrum_length, 2)
+                print(f"P_sh_clean: {P_sh_clean.shape}")
+                print(f"P_nasmyth: {P_nasmyth.shape}")
+                print(index)
+                # TODO, FIX NUMBER OF ROWS, P_NASMYTH IS 0 AFTER 101 ITERATIONS
                 spectrum_input = np.stack((P_sh_clean, P_nasmyth), axis=-1)
 
                 # Collect scalar features (mean values over the window)
@@ -170,13 +174,13 @@ def create_cnn_model(spectrum_input_shape, scalar_input_shape):
     return model
 
 
-def train_cnn_model(data, dataset, params):
+def train_cnn_model(data, dataset, params, filename):
     """
     Train the CNN model to predict the integration range.
     """
     # Prepare training data
     spectra, scalar_features, integration_ranges = prepare_training_data(
-        data, dataset, params)
+        data, dataset, params, filename)
 
     print(f"Spectra shape: {spectra.shape}")
     print(f"Scalar features shape: {scalar_features.shape}")

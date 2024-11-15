@@ -5,16 +5,9 @@ import scipy.io
 from diss_rate_odas_nagai import *
 from helper import *
 from keras import models
-from scipy.signal import welch
-from scipy.signal.windows import hann
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Button
 import hdf5storage
 from display_graph import *
 from cnn import *
-
-
-FILENAME = ''
 
 
 def get_file():
@@ -318,7 +311,6 @@ def save_dissipation_rate(diss_results, profile_num):
 
 
 def main():
-    global FILENAME
     params = {
         'HP_cut': 1.0,          # High-pass filter cutoff frequency (Hz)
         'LP_cut': 10.0,         # Low-pass filter cutoff frequency (Hz)
@@ -341,7 +333,6 @@ def main():
         'P_end': 1000.0         # End pressure (dbar)
     }
     FILENAME = get_file()
-    print(f"Filename used: {FILENAME}")
     data, dataset = load_mat_file(FILENAME)
 
     # Load or train the CNN model for integration range prediction
@@ -355,7 +346,7 @@ def main():
     except (IOError, OSError, ValueError):
         # If model file does not exist, train the model
         print(f"No pre-trained model found. Training a new CNN model.")
-        model = train_cnn_model(data, dataset, params)
+        model = train_cnn_model(data, dataset, params, FILENAME)
         # Save the trained model
         model.save(model_filename)
         print(f"Saved trained CNN model to {model_filename}")

@@ -3,11 +3,213 @@ from nasmyth import nasmyth
 from clean_shear_spec import clean
 
 
-# def visc35(T):
-#     # Kinematic viscosity of seawater at 35 PSU (salinity), at temperature T (in degrees Celsius)
-#     # Units: m²/s
-#     nu = 1e-6 * (17.91 - 0.5381*T + 0.00694*T**2)
-#     return nu
+def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
+                                speed, T, N2, P, fit_order=5, f_AA=98, K_max_pred=None):
+    """
+    Calculate dissipation rates over an entire profile.
+    """
+
+    # Check inputs
+    if diss_length < 2 * fft_length:
+        raise ValueError(
+            'Invalid size for diss_length - must be greater than 2 * fft_length.')
+
+    if SH.shape[0] != A.shape[0] or SH.shape[0] != T.shape[0] or SH.shape[0] != P.shape[0]:
+        raise ValueError(
+            f"Same number of rows required for SH, A, T, P... SH: {SH.shape[0]}, A: {A.shape[0]}, T: {T.shape[0]}, P: {P.shape[0]}")
+
+    if not np.isscalar(speed) and len(speed) != SH.shape[0]:
+        raise ValueError(
+            f'Speed vector must have the same number of rows as shear, speed: {len(speed)}')
+
+    if diss_length > SH.shape[0]:
+        raise ValueError(
+            'Diss_length cannot be longer than the length of the shear vectors')
+
+    f_AA *= 0.9  # constrain limit to 90% of F_AA
+
+    select = np.arange(diss_length)
+
+    # Calculate the number of dissipation estimates
+    if overlap >= diss_length:
+        overlap = diss_length // 2
+    if overlap < 0:
+        overlap = 0
+    overlap = int(overlap)
+
+    if K_max_pred is not None:
+        use_predicted_ranges = True
+        number_of_rows = K_max_pred.shape[0]
+        # use_predicted_ranges = False
+    else:
+        use_predicted_ranges = False
+        number_of_rows = 1 + \
+            int(np.floor((SH.shape[0] - diss_length) //
+                (diss_length - overlap)))
+ #
+    print(f"NUMBER OF DISS ESTIMATES!!!: {number_of_rows}")
+    F_length = 1 + int(np.floor(fft_length / 2))
+    print(f"FFT_LENGTH: {F_length}")
+
+    # Pre-allocate matrices
+    diss = {}
+    num_probes = SH.shape[1]
+    diss['e'] = np.zeros((number_of_rows, num_probes))
+    diss['K_min'] = np.zeros_like(diss['e'])
+    diss['K_max'] = np.zeros_like(diss['e'])
+    diss['method'] = np.zeros_like(diss['e'])
+    diss['Nasmyth_spec'] = np.zeros((number_of_rows, num_probes, F_length))
+    diss['sh'] = np.zeros((number_of_rows, num_probes, num_probes, F_length))
+    diss['sh_clean'] = np.zeros_like(diss['sh'])
+    diss['AA'] = np.zeros((number_of_rows, A.shape[1], A.shape[1], F_length))
+    diss['UA'] = np.zeros((number_of_rows, num_probes, A.shape[1], F_length))
+    diss['F'] = np.zeros((number_of_rows, F_length))
+    diss['K'] = np.zeros_like(diss['F'])
+    diss['speed'] = np.zeros((number_of_rows, 1))
+    diss['nu'] = np.zeros_like(diss['speed'])
+    diss['P'] = np.zeros_like(diss['speed'])
+    diss['T'] = np.zeros_like(diss['speed'])
+    diss['N2'] = np.zeros((number_of_rows, num_probes))
+    diss['Krho'] = np.zeros_like(diss['N2'])
+    diss['flagood'] = np.zeros_like(diss['e'])
+
+    a = 1.0774e9  # From Lueck's model for e/e_10
+    x_isr = 0.02  # Adjusted non-dimensional wavenumber
+    x_95 = 0.1205  # To be verified
+
+    index = 0
+    while select[-1] < SH.shape[0] - 1:
+        # Call clean_shear_spec
+        P_sh_clean, AA, P_sh, UA, F = clean(
+            A[select, :], SH[select, :], fft_length, fs)
+        # P_sh_clean and P_sh have shape [num_probes, num_probes, F_length]
+
+        # Convert frequency spectra to wavenumber spectra
+        W = np.mean(np.abs(speed[select]))
+        K = F / W
+        K_AA = f_AA / W
+        num_probes = SH.shape[1]
+        correction = np.ones((num_probes, num_probes, len(K)))
+
+        K_broadcast = K[np.newaxis, np.newaxis, :]  # Shape: (1, 1, len(K))
+        # Shape: (num_probes, num_probes, len(K))
+        K_broadcast = np.broadcast_to(K_broadcast, correction.shape)
+
+        correction_indices = K_broadcast <= 150
+        correction[correction_indices] = 1 + \
+            (K_broadcast[correction_indices] / 48) ** 2
+
+        P_sh_clean *= W * correction
+        P_sh *= W * correction
+
+        e = np.zeros(num_probes)
+        K_max = np.zeros(num_probes)
+        K_min = np.zeros(num_probes)
+        method = np.zeros(num_probes)
+        flagood = np.zeros(num_probes)
+
+        mean_T = np.mean(T[select])
+        nu = visc35(mean_T)
+
+        for column_index in range(num_probes):
+            if use_predicted_ranges:
+                # Use the predicted K_min and K_max for this window and probe
+
+                K_min_predicted = K[0]  # TEMP
+                K_max_predicted = K_max_pred[index, column_index]
+
+                # Ensure K_min and K_max are within valid K range
+                K_min_valid = max(K_min_predicted, K[0])
+                K_max_valid = min(K_max_predicted, K[-1])
+
+                if num_probes == 1:
+                    shear_spectrum = P_sh_clean.squeeze()
+                else:
+                    shear_spectrum = P_sh_clean[column_index, column_index, :]
+
+                # Define the integration range
+                integration_indices = np.where(
+                    (K >= K_min_valid) & (K <= K_max_valid))[0]
+
+                if len(integration_indices) == 0:
+                    e[column_index] = np.nan
+                    method[column_index] = np.nan
+                    flagi = 0
+                    continue
+
+                # Calculate dissipation rate using the predicted range
+                e_final = 7.5 * nu * np.trapz(
+                    shear_spectrum[integration_indices],
+                    K[integration_indices]
+                )
+
+                e[column_index] = e_final
+                K_min[column_index] = K_min_valid
+                K_max[column_index] = K_max_valid
+                # Indicate method used is CNN prediction
+                method[column_index] = 2
+                flagi = 1
+
+            else:
+                # Get auto-spectrum
+                if num_probes == 1:
+                    shear_spectrum = P_sh_clean.squeeze()
+                else:
+                    shear_spectrum = P_sh_clean[column_index, column_index, :]
+
+                K_range = K <= 10
+                e_10 = 7.5 * nu * np.trapz(shear_spectrum[K_range], K[K_range])
+                e_1 = e_10 * np.sqrt(1 + a * e_10)
+
+                if e_1 < 9e-2:
+                    # Use variance method
+                    e_4, K_min_i, K_max_i, method_i, flagi = variance_method(
+                        K, shear_spectrum, e_1, nu, K_AA, fit_order)
+                    e[column_index] = e_4
+                    K_min[column_index] = K_min_i
+                    K_max[column_index] = K_max_i
+                    method[column_index] = method_i
+                else:
+                    # Use inertial subrange method
+                    K_limit = min(K_AA, 150)
+                    e_4, K_end, K_start = inertial_subrange(
+                        K, shear_spectrum, e_1, nu, K_limit)
+                    K_max[column_index] = K_end
+                    e[column_index] = e_4
+                    method[column_index] = 1
+                    flagi = 1
+
+            # Compute Krho
+            Krho = 0.2 * e[column_index] / np.mean(N2[select])
+            diss['Krho'][index, column_index] = Krho
+            diss['N2'][index, column_index] = np.mean(N2[select])
+            phi, k = nasmyth(e[column_index], nu, K)
+            diss['Nasmyth_spec'][index, column_index, :] = phi
+            flagood[column_index] = flagi
+
+        # Save results
+        diss['e'][index, :] = e
+        diss['K_min'][index, :] = K_min
+        diss['K_max'][index, :] = K_max
+        diss['method'][index, :] = method
+        diss['sh_clean'][index, :, :, :] = P_sh_clean
+        diss['sh'][index, :, :, :] = P_sh
+        diss['AA'][index, :, :, :] = AA
+        diss['UA'][index, :, :, :] = UA.real
+        diss['F'][index, :] = F
+        diss['K'][index, :] = K  # K?
+        diss['speed'][index, 0] = W
+        diss['nu'][index, 0] = nu
+        diss['T'][index, 0] = mean_T
+        diss['P'][index, 0] = np.mean(P[select])
+        diss['flagood'][index, :] = flagood
+
+        index += 1
+        select = select + int(diss_length - overlap)
+        if select[-1] >= SH.shape[0]:
+            break
+
+    return diss
 
 
 def visc35(T):
@@ -117,290 +319,122 @@ def inertial_subrange(K, shear_spectrum, e, nu, K_limit):
     return e, K_max, K_min
 
 
-def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
-                                speed, T, N2, P, fit_order=5, f_AA=98, K_max_pred=None):
+def variance_method(K, shear_spectrum, e_1, nu, K_AA, fit_order):
     """
-    Calculate dissipation rates over an entire profile.
+    Calculate the dissipation rate using the variance method.
+
+    Parameters:
+    - K: array_like
+        Wavenumbers.
+    - shear_spectrum: array_like
+        Wavenumber spectrum of shear.
+    - e_1: float
+        Initial estimate of the dissipation rate.
+    - nu: float
+        Kinematic viscosity.
+    - K_AA: float
+        Anti-aliasing wavenumber limit.
+    - fit_order: int
+        Order of the polynomial fit.
+
+    Returns:
+    - e_4: float
+        Final estimate of the dissipation rate.
+    - K_min: float
+        Minimum wavenumber used in integration.
+    - K_max: float
+        Maximum wavenumber used in integration.
+    - method: int
+        Method identifier (0 for variance method).
+    - flagi: int
+        Flag indicating success (1) or failure (0).
     """
-
-    # Check inputs
-    if diss_length < 2 * fft_length:
-        raise ValueError(
-            'Invalid size for diss_length - must be greater than 2 * fft_length.')
-
-    if SH.shape[0] != A.shape[0] or SH.shape[0] != T.shape[0] or SH.shape[0] != P.shape[0]:
-        raise ValueError(
-            f"Same number of rows required for SH, A, T, P... SH: {SH.shape[0]}, A: {A.shape[0]}, T: {T.shape[0]}, P: {P.shape[0]}")
-
-    if not np.isscalar(speed) and len(speed) != SH.shape[0]:
-        raise ValueError(
-            f'Speed vector must have the same number of rows as shear, speed: {len(speed)}')
-
-    if diss_length > SH.shape[0]:
-        raise ValueError(
-            'Diss_length cannot be longer than the length of the shear vectors')
-
-    if K_max_pred is not None:
-        # use_predicted_ranges = True
-        use_predicted_ranges = False
-    else:
-        use_predicted_ranges = False
-
-    f_AA *= 0.9  # constrain limit to 90% of F_AA
-
-    select = np.arange(diss_length)
-
-    # Calculate the number of dissipation estimates
-    if overlap >= diss_length:
-        overlap = diss_length / 2
-    if overlap < 0:
-        overlap = 0
-    number_of_rows = 1 + \
-        int(np.floor((SH.shape[0] - diss_length) / (diss_length - overlap)))
-    F_length = 1 + int(np.floor(fft_length / 2))
-    print(f"Number of Estimates total: {F_length}")
-
-    # Pre-allocate matrices
-    diss = {}
-    num_probes = SH.shape[1]
-    diss['e'] = np.zeros((number_of_rows, num_probes))
-    diss['K_min'] = np.zeros_like(diss['e'])
-    diss['K_max'] = np.zeros_like(diss['e'])
-    diss['method'] = np.zeros_like(diss['e'])
-    diss['Nasmyth_spec'] = np.zeros((number_of_rows, num_probes, F_length))
-    diss['sh'] = np.zeros((number_of_rows, num_probes, num_probes, F_length))
-    diss['sh_clean'] = np.zeros_like(diss['sh'])
-    diss['AA'] = np.zeros((number_of_rows, A.shape[1], A.shape[1], F_length))
-    diss['UA'] = np.zeros((number_of_rows, num_probes, A.shape[1], F_length))
-    diss['F'] = np.zeros((number_of_rows, F_length))
-    diss['K'] = np.zeros_like(diss['F'])
-    diss['speed'] = np.zeros((number_of_rows, 1))
-    diss['nu'] = np.zeros_like(diss['speed'])
-    diss['P'] = np.zeros_like(diss['speed'])
-    diss['T'] = np.zeros_like(diss['speed'])
-    diss['N2'] = np.zeros((number_of_rows, num_probes))
-    diss['Krho'] = np.zeros_like(diss['N2'])
-    diss['flagood'] = np.zeros_like(diss['e'])
-
     a = 1.0774e9  # From Lueck's model for e/e_10
-    x_isr = 0.02  # Adjusted non-dimensional wavenumber
     x_95 = 0.1205  # To be verified
 
-    index = 0
-    while select[-1] < SH.shape[0]:
-        # Call clean_shear_spec
-        P_sh_clean, AA, P_sh, UA, F = clean(
-            A[select, :], SH[select, :], fft_length, fs)
-        # P_sh_clean and P_sh have shape [num_probes, num_probes, F_length]
+    e_2 = e_1
+    K_95 = x_95 * (e_2 / nu ** 3) ** 0.25
+    K_95 = max(K_95, np.finfo(float).eps)  # Ensure non-zero
+    K_limit = fit_in_range(min(K_AA, K_95), [0, 150])
+    valid_shear = K <= K_limit
+    Index_limit = np.sum(valid_shear)
+    y = np.log10(shear_spectrum[1:Index_limit])
+    x = np.log10(K[1:Index_limit])
+    fit_order = int(fit_in_range(fit_order, [3, 8]))
+    if Index_limit > fit_order + 2:
+        p = np.polyfit(x, y, fit_order)
+        pd1 = np.polyder(p)
+        pr1 = np.roots(pd1)
+        pr1 = pr1[np.isreal(pr1)]
+        # minima only
+        pr1 = pr1[np.polyval(np.polyder(pd1), pr1) > 0]
+        pr1 = pr1[pr1 >= np.log10(10)]
+        if pr1.size == 0:
+            pr1 = np.log10(K_95)
+        else:
+            pr1 = pr1[0]
+    else:
+        pr1 = np.log10(K_95)
+    K_limit = fit_in_range(min([pr1, np.log10(K_95), np.log10(K_AA)]),
+                           [np.log10(10), np.log10(150)],
+                           np.log10(150))
+    Range = K <= 10 ** K_limit
+    e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
 
-        # Convert frequency spectra to wavenumber spectra
-        W = np.mean(np.abs(speed[select]))
-        K = F / W
-        K_AA = f_AA / W
-        num_probes = SH.shape[1]
-        correction = np.ones((num_probes, num_probes, len(K)))
+    x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
+    x_limit **= (4 / 3)
 
-        K_broadcast = K[np.newaxis, np.newaxis, :]  # Shape: (1, 1, len(K))
-        # Shape: (num_probes, num_probes, len(K))
-        K_broadcast = np.broadcast_to(K_broadcast, correction.shape)
+    variance_resolved = np.tanh(
+        48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
 
-        correction_indices = K_broadcast <= 150
-        correction[correction_indices] = 1 + \
-            (K_broadcast[correction_indices] / 48) ** 2
+    e_new = e_3 / variance_resolved
+    if not np.isfinite(e_new):
+        print("Warning: e_new is invalid.")
+        return np.nan, np.nan, np.nan, np.nan, 0
 
-        P_sh_clean *= W * correction
-        P_sh *= W * correction
-
-        e = np.zeros(num_probes)
-        K_max = np.zeros(num_probes)
-        K_min = np.zeros(num_probes)
-        method = np.zeros(num_probes)
-        flagood = np.zeros(num_probes)
-
-        mean_T = np.mean(T[select])
-        nu = visc35(mean_T)
-
-        for column_index in range(num_probes):
-            if use_predicted_ranges:
-                # Use the predicted K_min and K_max for this window and probe
-                K_min_predicted = K_AA  # TEMP
-                K_max_predicted = K_max_pred[index, column_index]
-
-                # Ensure K_min and K_max are within valid K range
-                K_min_valid = max(K_min_predicted, K[0])
-                K_max_valid = min(K_max_predicted, K[-1])
-
-                if num_probes == 1:
-                    shear_spectrum = P_sh_clean.squeeze()
-                else:
-                    shear_spectrum = P_sh_clean[column_index, column_index, :]
-
-                # Define the integration range
-                integration_indices = np.where(
-                    (K >= K_min_valid) & (K <= K_max_valid))[0]
-
-                if len(integration_indices) == 0:
-                    e[column_index] = np.nan
-                    method[column_index] = np.nan
-                    flagi = 0
-                    continue
-
-                # Calculate dissipation rate using the predicted range
-                e_final = 7.5 * nu * np.trapz(
-                    shear_spectrum[integration_indices],
-                    K[integration_indices]
-                )
-
-                e[column_index] = e_final
-                K_min[column_index] = K_min_valid
-                K_max[column_index] = K_max_valid
-                # Indicate method used is CNN prediction
-                method[column_index] = 2
-                flagi = 1
-
-            else:
-                # Get auto-spectrum
-                if num_probes == 1:
-                    shear_spectrum = P_sh_clean.squeeze()
-                else:
-                    shear_spectrum = P_sh_clean[column_index, column_index, :]
-
-                K_range = K <= 10
-                e_10 = 7.5 * nu * np.trapz(shear_spectrum[K_range], K[K_range])
-                e_1 = e_10 * np.sqrt(1 + a * e_10)
-
-                if e_1 < 9e-2:
-                    # Use variance method
-                    e_2 = e_1
-                    K_95 = x_95 * (e_2 / nu ** 3) ** 0.25
-                    K_95 = max(K_95, np.finfo(float).eps)  # Non-zero
-                    K_limit = fit_in_range(min(K_AA, K_95), [0, 150])
-                    valid_shear = K <= K_limit
-                    Index_limit = np.sum(valid_shear)
-                    y = np.log10(shear_spectrum[1:Index_limit])
-                    x = np.log10(K[1:Index_limit])
-                    fit_order = int(fit_in_range(fit_order, [3, 8]))
-                    if Index_limit > fit_order + 2:
-                        p = np.polyfit(x, y, fit_order)
-                        pd1 = np.polyder(p)
-                        pr1 = np.roots(pd1)
-                        pr1 = pr1[np.isreal(pr1)]
-                        # minima only
-                        pr1 = pr1[np.polyval(np.polyder(pd1), pr1) > 0]
-                        pr1 = pr1[pr1 >= np.log10(10)]
-                        if pr1.size == 0:
-                            pr1 = np.log10(K_95)
-                        else:
-                            pr1 = pr1[0]
-                    else:
-                        pr1 = np.log10(K_95)
-                    K_limit = fit_in_range(min([pr1, np.log10(K_95), np.log10(K_AA)]),
-                                           [np.log10(10), np.log10(150)],
-                                           np.log10(150))
-                    Range = K <= 10 ** K_limit
-                    e_3 = 7.5 * nu * np.trapz(shear_spectrum[Range], K[Range])
-
-                    x_limit = K[Range][-1] * (nu ** 3 / e_3) ** 0.25
-                    x_limit **= (4 / 3)
-
-                    variance_resolved = np.tanh(
-                        48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
-
-                    e_new = e_3 / variance_resolved
-                    if not np.isfinite(e_new):
-                        print("Warning: e_new is invalid.")
-                        e[column_index] = np.nan
-                        method[column_index] = np.nan
-                        flagi = 0
-                        continue
-
-                    # Iterative correction
-                    max_iterations = 100
-                    iteration_count = 0
-                    while True:
-                        iteration_count += 1
-                        if iteration_count >= max_iterations:
-                            print(
-                                "Warning: Maximum iterations reached without convergence.")
-                            e[column_index] = np.nan
-                            method[column_index] = np.nan
-                            flagi = 0
-                            break
-                        x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
-                        x_limit **= (4 / 3)
-                        variance_resolved = np.tanh(
-                            48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
-                        e_old = e_new
-                        e_new = e_3 / variance_resolved
-                        if e_new / e_old < 1.02:
-                            e_3 = e_new
-                            e_3 = float(e_3)
-                            break
-
-                # Correct for missing variance at low end
-                    phi, k = nasmyth(e_3, nu, K[1:3])
-                    # phi, k = nasmyth(e_3, nu, K[1])
-
-                    e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
-                    if isinstance(e_4, np.ndarray):
-                        e_4 = e_4[0]
-                    e_4 = float(e_4)
-                    if e_4 / e_3 > 1.1:
-                        e_new = e_4 / variance_resolved
-                        while True:
-                            x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
-                            x_limit **= (4 / 3)
-                            variance_resolved = np.tanh(
-                                48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
-                            e_old = e_new
-                            e_new = e_4 / variance_resolved
-                            if e_new / e_old < 1.02:
-                                e_4 = e_new
-                                break
-
-                    K_min[column_index] = K[Range][0]
-                    K_max[column_index] = K[Range][-1]
-                    e[column_index] = e_4
-                    method[column_index] = 0
-                    flagi = 1
-                else:
-                    # Use inertial subrange method
-                    K_limit = min(K_AA, 150)
-                    e_4, K_end, K_start = inertial_subrange(
-                        K, shear_spectrum, e_1, nu, K_limit)
-                    K_max[column_index] = K_end
-                    e[column_index] = e_4
-                    method[column_index] = 1
-                    flagi = 1
-
-            # Compute Krho
-            Krho = 0.2 * e[column_index] / np.mean(N2[select])
-            diss['Krho'][index, column_index] = Krho
-            diss['N2'][index, column_index] = np.mean(N2[select])
-            phi, k = nasmyth(e[column_index], nu, K)
-            diss['Nasmyth_spec'][index, column_index, :] = phi
-            flagood[column_index] = flagi
-
-        # Save results
-        diss['e'][index, :] = e
-        diss['K_min'][index, :] = K_min
-        diss['K_max'][index, :] = K_max
-        diss['method'][index, :] = method
-        diss['sh_clean'][index, :, :, :] = P_sh_clean
-        diss['sh'][index, :, :, :] = P_sh
-        diss['AA'][index, :, :, :] = AA
-        diss['UA'][index, :, :, :] = UA.real
-        diss['F'][index, :] = F
-        diss['K'][index, :] = K  # K?
-        diss['speed'][index, 0] = W
-        diss['nu'][index, 0] = nu
-        diss['T'][index, 0] = mean_T
-        diss['P'][index, 0] = np.mean(P[select])
-        diss['flagood'][index, :] = flagood
-
-        index += 1
-        select = select + int(diss_length - overlap)
-        if select[-1] >= SH.shape[0]:
+    # Iterative correction
+    max_iterations = 100
+    iteration_count = 0
+    while True:
+        iteration_count += 1
+        if iteration_count >= max_iterations:
+            print(
+                "Warning: Maximum iterations reached without convergence.")
+            return np.nan, np.nan, np.nan, np.nan, 0
+        x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
+        x_limit **= (4 / 3)
+        variance_resolved = np.tanh(
+            48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
+        e_old = e_new
+        e_new = e_3 / variance_resolved
+        if e_new / e_old < 1.02:
+            e_3 = e_new
+            e_3 = float(e_3)
             break
 
-    return diss
+    # Correct for missing variance at low end
+    phi, _ = nasmyth(e_3, nu, K[1:3])
+
+    e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
+    if isinstance(e_4, np.ndarray):
+        e_4 = e_4[0]
+    e_4 = float(e_4)
+    if e_4 / e_3 > 1.1:
+        e_new = e_4 / variance_resolved
+        while True:
+            x_limit = K[Range][-1] * (nu ** 3 / e_new) ** 0.25
+            x_limit **= (4 / 3)
+            variance_resolved = np.tanh(
+                48 * x_limit) - 2.9 * x_limit * np.exp(-22.3 * x_limit)
+            e_old = e_new
+            e_new = e_4 / variance_resolved
+            if e_new / e_old < 1.02:
+                e_4 = e_new
+                break
+
+    K_min = K[Range][0]
+    K_max = K[Range][-1]
+    method = 0  # Method identifier for variance method
+    flagi = 1   # Success flag
+
+    return e_4, K_min, K_max, method, flagi
