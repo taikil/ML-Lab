@@ -35,42 +35,33 @@ def wiener(dw_dx, az, N):
     if dw_dx.shape != az.shape:
         raise ValueError('Both inputs must have the same size')
 
-    L = az.shape[0]
-    n_channels = az.shape[1]
+    L, n_channels = az.shape
+    L_N = L - N
 
     # Calculate biased autocovariance of az
-    az_padded = np.vstack([az[:L - N, :], np.zeros((N, n_channels))])
-    n_fft = az_padded.shape[0]
+    az_padded = np.vstack([az[:L_N, :], np.zeros((N, n_channels))])
     c_az = np.fft.fft(az_padded, axis=0)
     C_az = np.abs(c_az) ** 2
-    # Scale to match MATLAB's unscaled IFFT
-    # C_az = np.fft.ifft(C_az, axis=0) * n_fft
     C_az = np.fft.ifft(C_az, axis=0)
+    C_az = np.real(C_az[:N+1, :])
 
     # Calculate biased cross-covariance of dw_dx and az
-    dw_dx_padded = np.vstack([dw_dx[:L - N, :], np.zeros((N, n_channels))])
+    dw_dx_padded = np.vstack([dw_dx[:L_N, :], np.zeros((N, n_channels))])
     C_dw_dx = np.fft.fft(dw_dx_padded, axis=0)
-    # C_az_dw_dx = np.fft.ifft(C_dw_dx * np.conj(c_az),
-    #                          axis=0) * n_fft  # Scale to match MATLAB
-    C_az_dw_dx = np.fft.ifft(C_dw_dx * np.conj(c_az),
-                             axis=0)
+    C_az_dw_dx = np.fft.ifft(C_dw_dx * np.conj(c_az), axis=0)
+    C_az_dw_dx = np.real(C_az_dw_dx[:N+1, :])
 
-    # Keep only the first N+1 lags
-    C_az = np.real(C_az[:N + 1, :])
-    C_az_dw_dx = np.real(C_az_dw_dx[:N + 1, :])
-
-    # Initialize output arrays
-    w = np.zeros((N + 1, n_channels))
+    w = np.zeros((N+1, n_channels))
     dw_dx_clean = np.zeros_like(dw_dx)
 
     for k in range(n_channels):
-        # Form Toeplitz matrix for autocovariance
+        # Form Toeplitz matrix from autocovariance
         R = toeplitz(C_az[:, k])
-        # Solve for Wiener filter coefficients
+        # Solve for filter coefficients
         w[:, k] = np.linalg.solve(R, C_az_dw_dx[:, k])
-        # Estimate the contamination
+        # Apply the filter to az to estimate contamination
         contamination_estimate = lfilter(w[:, k], [1], az[:, k])
-        # Subtract estimated contamination to get the cleaned signal
+        # Subtract estimated contamination to get cleaned signal
         dw_dx_clean[:, k] = dw_dx[:, k] - contamination_estimate
 
     # If the original signals were 1D, return 1D arrays

@@ -2,6 +2,9 @@ from keras import models
 import sys
 import numpy as np
 import scipy.io
+from scipy.interpolate import interp1d
+from scipy.integrate import cumtrapz
+from scipy.optimize import brentq
 from diss_rate_odas_nagai import *
 from helper import *
 from keras import models
@@ -130,7 +133,8 @@ def extract_output_labels(diss):
     Extract output labels from the dissipation data for a given profile number.
     """
     # List of variables to extract from 'diss'
-    output_variables = ['e', 'K_max', 'Nasmyth_spec', 'flagood']
+    output_variables = ['e', 'nu', 'sh',
+                        'K_max', 'K', 'Nasmyth_spec', 'flagood']
 
     # Dictionary to store the extracted variables
     output_labels = {}
@@ -149,6 +153,55 @@ def extract_output_labels(diss):
             raise Exception(f"Error extracting variable '{var_name}': {e}")
 
     return output_labels
+
+
+def find_K_min(epsilon, nu, K, P_shear, K_max):
+    # Ensure K and P_shear are numpy arrays
+    K = np.array(K)
+    P_shear = np.array(P_shear)
+
+    # Sort K and P_shear in ascending order of K
+    sorted_indices = np.argsort(K)
+    K = K[sorted_indices]
+    P_shear = P_shear[sorted_indices]
+
+    # Compute cumulative integral from smallest K up to K_max
+    cumulative_integral = cumtrapz(P_shear, K, initial=0)
+
+    # Interpolate cumulative integral for precise calculations
+    from scipy.interpolate import interp1d
+    integral_interp = interp1d(
+        K, cumulative_integral, kind='linear', fill_value="extrapolate")
+
+    # Define the function to find the root
+    def func(K_min):
+        # Compute integral from K_min to K_max
+        integral = integral_interp(K_max) - integral_interp(K_min)
+        # Compute the difference between calculated epsilon and known epsilon
+        return 7.5 * nu * integral - epsilon
+
+    # Initial bounds for K_min
+    K_min_lower = K[0]
+    K_min_upper = K_max
+
+    # Check if the function changes sign over the interval
+    if func(K_min_lower) * func(K_min_upper) > 0:
+        print("Cannot find a valid K_min in the given range.")
+        return 0
+
+    # Solve for K_min
+    K_min_solution = brentq(func, K_min_lower, K_min_upper)
+
+    cumulative_integral = cumtrapz(P_shear, K, initial=0)
+    integral_interp = interp1d(
+        K, cumulative_integral, kind='linear', fill_value="extrapolate")
+    integral_value = integral_interp(K_max) - integral_interp(K_min_solution)
+    epsilon_calc = 7.5 * nu * integral_value
+
+    print(
+        f" K_min: {K_min_solution}, Original epsilon: {epsilon}, Recalculated epsilon: {epsilon_calc}")
+
+    return K_min_solution
 
 
 def get_profile_indices(P_fast, P_slow, params, fs_slow, fs_fast):
@@ -251,6 +304,8 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             P_nasmyth, _ = nasmyth(epsilon, nu, K)
 
             # Calculate the final dissipation rate using the CNN-predicted integration range
+            print(f"K_MAX PRED FOR INTEGRATION: {K_max_pred}")
+            print(f"K_MIN PRED FOR INTEGRATION: {K_min_pred}")
             idx_integration = np.where(
                 (K >= K_min_pred) & (K <= K_max_pred))[0]
             e_final = 7.5 * nu * \
@@ -265,6 +320,10 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
 
             # Update Nasmyth spectrum in the diss dictionary
             P_nasmyth, _ = nasmyth(epsilon_cnn, nu, K)
+            print(f"EPSILON_CNN: {epsilon_cnn}")
+            print(f"K after epsilon_cnn: {len(K)}")
+            print(K)
+            print(f"Nasmyth after epsilon_cnn: {len(P_nasmyth)}")
             diss['Nasmyth_spec'][index, probe_index, :] = P_nasmyth
 
             # Update Krho and other derived quantities
@@ -341,7 +400,7 @@ def main():
     model_filename = f'{model_filename}.keras'
     while True:
         choice = input(
-            "Do you want to (1) continue training the existing model, (2) train a new model, or (3) use the existing model without retraining? Enter 1, 2, or 3: ")
+            "Do you want to \n(1) continue training the existing model\n(2) train a new model\n(3) use the existing model without retraining?\nEnter 1, 2, or 3: ")
         if choice in ['1', '2', '3']:
             break
         else:
@@ -356,6 +415,9 @@ def main():
             model = train_cnn_model(
                 data, dataset, params, FILENAME, existing_model=model)
             # Save the updated model
+            if model is None:
+                print("No model was returned by train_cnn_model.")
+                sys.exit(1)
             model.save(model_filename)
             print(f"Updated CNN model saved to {model_filename}")
         except (IOError, OSError, ValueError) as e:

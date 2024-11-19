@@ -4,7 +4,7 @@ from clean_shear_spec import clean
 
 
 def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
-                                speed, T, N2, P, fit_order=5, f_AA=98, K_max_pred=None):
+                                speed, T, N2, P, fit_order=5, f_AA=98, K_max_pred=None, K_min_pred=None):
     """
     Calculate dissipation rates over an entire profile.
     """
@@ -37,7 +37,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         overlap = 0
     overlap = int(overlap)
 
-    if K_max_pred is not None:
+    if K_max_pred and K_min_pred is not None:
         use_predicted_ranges = True
         number_of_rows = K_max_pred.shape[0]
         # use_predicted_ranges = False
@@ -115,7 +115,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             if use_predicted_ranges:
                 # Use the predicted K_min and K_max for this window and probe
 
-                K_min_predicted = K[0]  # TEMP
+                K_min_predicted = K_min_pred[index, column_index]
                 K_max_predicted = K_max_pred[index, column_index]
 
                 # Ensure K_min and K_max are within valid K range
@@ -123,9 +123,9 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
                 K_max_valid = min(K_max_predicted, K[-1])
 
                 if num_probes == 1:
-                    shear_spectrum = P_sh_clean.squeeze()
+                    shear_spectrum = P_sh.squeeze()
                 else:
-                    shear_spectrum = P_sh_clean[column_index, column_index, :]
+                    shear_spectrum = P_sh[column_index, column_index, :]
 
                 # Define the integration range
                 integration_indices = np.where(
@@ -153,9 +153,9 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             else:
                 # Get auto-spectrum
                 if num_probes == 1:
-                    shear_spectrum = P_sh_clean.squeeze()
+                    shear_spectrum = P_sh.squeeze()
                 else:
-                    shear_spectrum = P_sh_clean[column_index, column_index, :]
+                    shear_spectrum = P_sh[column_index, column_index, :]
 
                 K_range = K <= 10
                 e_10 = 7.5 * nu * np.trapz(shear_spectrum[K_range], K[K_range])

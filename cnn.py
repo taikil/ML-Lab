@@ -1,6 +1,6 @@
 from keras import callbacks, layers, models
 from sklearn.model_selection import train_test_split
-from predict_dissipation import extract_output_labels, load_output_data
+from predict_dissipation import extract_output_labels, load_output_data, find_K_min
 from display_graph import nasmyth, plot_training_history
 from diss_rate_odas_nagai import get_diss_odas_nagai4gui2024, nasmyth
 from helper import compute_buoyancy_frequency, compute_density
@@ -30,11 +30,34 @@ def prepare_training_data(data, dataset, params, filename):
         profile = dataset[0, i]  # Access the i-th profile
         # DAT_00n_dissrate_0nn.mat
         training_file = f"{filename[:-4]}_dissrate_{i+1:03d}.mat"
-        print(f"Training File: {training_file}")
+        # print(f"Training File: {training_file}")
         diss_data = load_output_data(training_file)
         training_labels = extract_output_labels(diss_data)
         print(training_labels['K_max'].shape)
-        pred_K_max = training_labels['K_max']
+        K_max_values = training_labels['K_max']
+        num_windows = training_labels['e'].shape[0]
+        num_probes = training_labels['e'].shape[1]
+        K_min_values = np.full((num_windows, num_probes), np.nan)
+
+        # Compute all K_min values
+        for window_index in range(num_windows):
+            for probe_index in range(num_probes):
+                epsilon = training_labels['e'][window_index, probe_index]
+                nu = training_labels['nu'][window_index]
+                K = training_labels['K'][window_index, :]
+                P_shear = training_labels['sh'][window_index,
+                                                probe_index, probe_index, :]
+                K_max = training_labels['K_max'][window_index, probe_index]
+
+                # Validate data
+                if not np.isfinite(epsilon) or epsilon <= 0 or not np.isfinite(K_max) or K_max <= K[0]:
+                    print(
+                        f"Skipping window {window_index}, probe {probe_index} due to invalid data.")
+                    continue
+
+                # Compute K_min
+                K_min = find_K_min(epsilon, nu, K, P_shear, K_max)
+                K_min_values[window_index, probe_index] = K_min
 
         # Extract variables for the profile
         try:
@@ -86,7 +109,8 @@ def prepare_training_data(data, dataset, params, filename):
                 P=P,
                 fit_order=fit_order,
                 f_AA=f_AA,
-                K_max_pred=pred_K_max
+                K_max_pred=K_max_values,
+                K_min_pred=K_min_values
             )
         except Exception as e:
             print(f"Error processing profile {i+1}: {e}")
@@ -94,12 +118,12 @@ def prepare_training_data(data, dataset, params, filename):
 
         # Extract spectra and integration ranges
         num_estimates = diss['e'].shape[0]
-        print(f"Num estimates training: {num_estimates}")
+        # print(f"Num estimates training: {num_estimates}")
         num_probes = SH.shape[1]
         for index in range(num_estimates):
             for probe_index in range(num_probes):
-                P_sh_clean = diss['sh_clean'][index,
-                                              probe_index, probe_index, :]
+                P_sh = diss['sh'][index,
+                                  probe_index, probe_index, :]
                 K = diss['K'][index, :]  # Wavenumber array
                 epsilon = diss['e'][index, probe_index]
                 K_max = diss['K_max'][index, probe_index]
@@ -114,11 +138,8 @@ def prepare_training_data(data, dataset, params, filename):
 
                 # Stack P_sh_clean and P_nasmyth to create multi-channel input
                 # Shape: (spectrum_length, 2)
-                print(f"P_sh_clean: {P_sh_clean.shape}")
-                print(f"P_nasmyth: {P_nasmyth.shape}")
-                print(index)
                 # TODO, FIX NUMBER OF ROWS, P_NASMYTH IS 0 AFTER 101 ITERATIONS
-                spectrum_input = np.stack((P_sh_clean, P_nasmyth), axis=-1)
+                spectrum_input = np.stack((P_sh, P_nasmyth), axis=-1)
 
                 # Collect scalar features (mean values over the window)
                 scalar_feature = np.array([
@@ -146,6 +167,7 @@ def prepare_training_data(data, dataset, params, filename):
 
 def create_cnn_model(spectrum_input_shape, scalar_input_shape):
     # Spectral Input
+    # print(f"Spectrum input shape: {spectrum_input_shape}")
     spectrum_input = layers.Input(
         shape=spectrum_input_shape, name='spectrum_input')
     x = layers.Conv1D(64, kernel_size=5, activation='relu')(spectrum_input)
@@ -187,9 +209,9 @@ def train_cnn_model(data, dataset, params, filename, existing_model=None):
         print("No training data was collected, there was an error in preparing the data")
         return
 
-    print(f"Spectra shape: {spectra.shape}")
-    print(f"Scalar features shape: {scalar_features.shape}")
-    print(f"Integration ranges shape: {integration_ranges.shape}")
+    # print(f"Spectra shape: {spectra.shape}")
+    # print(f"Scalar features shape: {scalar_features.shape}")
+    # print(f"Integration ranges shape: {integration_ranges.shape}")
 
     # Split data into training and validation sets
     X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_train, y_val = train_test_split(
