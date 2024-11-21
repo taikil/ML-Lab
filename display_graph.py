@@ -4,6 +4,14 @@ import numpy as np
 from nasmyth import nasmyth
 
 
+def plot_k_max(K_max):
+    plt.hist(K_max, bins=20)
+    plt.title("Distribution of K_max in Training Data")
+    plt.xlabel('K_max')
+    plt.ylabel('Frequency')
+    plt.show()
+
+
 def plot_spectra_interactive(spectra_data):
     """
     Plot multiple spectra in a single interactive window with navigation buttons.

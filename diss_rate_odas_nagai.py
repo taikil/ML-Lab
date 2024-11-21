@@ -37,7 +37,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         overlap = 0
     overlap = int(overlap)
 
-    if K_max_pred and K_min_pred is not None:
+    if K_max_pred is not None and K_min_pred is not None:
         use_predicted_ranges = True
         number_of_rows = K_max_pred.shape[0]
         # use_predicted_ranges = False
@@ -47,9 +47,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             int(np.floor((SH.shape[0] - diss_length) //
                 (diss_length - overlap)))
  #
-    print(f"NUMBER OF DISS ESTIMATES!!!: {number_of_rows}")
     F_length = 1 + int(np.floor(fft_length / 2))
-    print(f"FFT_LENGTH: {F_length}")
 
     # Pre-allocate matrices
     diss = {}

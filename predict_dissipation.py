@@ -184,22 +184,28 @@ def find_K_min(epsilon, nu, K, P_shear, K_max):
     K_min_lower = K[0]
     K_min_upper = K_max
 
-    # Check if the function changes sign over the interval
+    # Check if the function changes sign over the interval, if not K_min will be 0
     if func(K_min_lower) * func(K_min_upper) > 0:
-        print("Cannot find a valid K_min in the given range.")
+        # print("Cannot find a valid K_min in the given range.")
+        # print(
+        #     f"func(K_min_lower): {func(K_min_lower)}, func(K_min_upper): {func(K_min_upper)}")
+        # print(K_max)
+        # print(K)
+        # print(P_shear)
         return 0
 
     # Solve for K_min
     K_min_solution = brentq(func, K_min_lower, K_min_upper)
 
-    cumulative_integral = cumtrapz(P_shear, K, initial=0)
-    integral_interp = interp1d(
-        K, cumulative_integral, kind='linear', fill_value="extrapolate")
-    integral_value = integral_interp(K_max) - integral_interp(K_min_solution)
-    epsilon_calc = 7.5 * nu * integral_value
+    # For testing results only
+    # cumulative_integral = cumtrapz(P_shear, K, initial=0)
+    # integral_interp = interp1d(
+    #     K, cumulative_integral, kind='linear', fill_value="extrapolate")
+    # integral_value = integral_interp(K_max) - integral_interp(K_min_solution)
+    # epsilon_calc = 7.5 * nu * integral_value
 
-    print(
-        f" K_min: {K_min_solution}, Original epsilon: {epsilon}, Recalculated epsilon: {epsilon_calc}")
+    # print(
+    #     f" K_min: {K_min_solution}, Original epsilon: {epsilon}, Recalculated epsilon: {epsilon_calc}")
 
     return K_min_solution
 
@@ -320,10 +326,6 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
 
             # Update Nasmyth spectrum in the diss dictionary
             P_nasmyth, _ = nasmyth(epsilon_cnn, nu, K)
-            print(f"EPSILON_CNN: {epsilon_cnn}")
-            print(f"K after epsilon_cnn: {len(K)}")
-            print(K)
-            print(f"Nasmyth after epsilon_cnn: {len(P_nasmyth)}")
             diss['Nasmyth_spec'][index, probe_index, :] = P_nasmyth
 
             # Update Krho and other derived quantities
@@ -424,11 +426,17 @@ def main():
             print(f"Failed to load the model from {model_filename}: {e}")
             print("Training a new model instead.")
             model = train_cnn_model(data, dataset, params, FILENAME)
+            if model is None:
+                print("No model was returned by train_cnn_model.")
+                sys.exit(1)
             model.save(model_filename)
     elif choice == '2':
         # Train a new model
         print("Training a new CNN model.")
         model = train_cnn_model(data, dataset, params, FILENAME)
+        if model is None:
+            print("No model was returned by train_cnn_model.")
+            sys.exit(1)
         model.save(model_filename)
         print(f"New CNN model saved to {model_filename}")
     else:
@@ -449,7 +457,7 @@ def main():
 
     diss = process_profile(data, dataset, params, profile_num, model)
 
-    save_dissipation_rate(diss, profile_num)
+    save_dissipation_rate(diss, profile_num + 1)
 
     print("Processing completed successfully.")
 

@@ -33,7 +33,6 @@ def prepare_training_data(data, dataset, params, filename):
         # print(f"Training File: {training_file}")
         diss_data = load_output_data(training_file)
         training_labels = extract_output_labels(diss_data)
-        print(training_labels['K_max'].shape)
         K_max_values = training_labels['K_max']
         num_windows = training_labels['e'].shape[0]
         num_probes = training_labels['e'].shape[1]
@@ -48,6 +47,7 @@ def prepare_training_data(data, dataset, params, filename):
                 P_shear = training_labels['sh'][window_index,
                                                 probe_index, probe_index, :]
                 K_max = training_labels['K_max'][window_index, probe_index]
+                flagood = training_labels['flagood'][window_index, probe_index]
 
                 # Validate data
                 if not np.isfinite(epsilon) or epsilon <= 0 or not np.isfinite(K_max) or K_max <= K[0]:
