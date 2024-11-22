@@ -17,23 +17,20 @@ def prepare_training_data(data, dataset, params, filename):
     spectra = []
     scalar_features = []
     integration_ranges = []
-
-    fs_fast = float(np.squeeze(data['fs_fast']))
-    fs_slow = float(np.squeeze(data['fs_slow']))
+    flagoods = []
 
     num_profiles = dataset.size
 
     print(f"Number of profiles available for training: {num_profiles}")
 
+    # Fetch training Data
     for i in range(num_profiles):
         print(f"Processing profile {i+1}/{num_profiles}")
-        profile = dataset[0, i]  # Access the i-th profile
         # DAT_00n_dissrate_0nn.mat
         training_file = f"{filename[:-4]}_dissrate_{i+1:03d}.mat"
         # print(f"Training File: {training_file}")
         diss_data = load_output_data(training_file)
         training_labels = extract_output_labels(diss_data)
-        K_max_values = training_labels['K_max']
         num_windows = training_labels['e'].shape[0]
         num_probes = training_labels['e'].shape[1]
         K_min_values = np.full((num_windows, num_probes), np.nan)
@@ -43,9 +40,13 @@ def prepare_training_data(data, dataset, params, filename):
             for probe_index in range(num_probes):
                 epsilon = training_labels['e'][window_index, probe_index]
                 nu = training_labels['nu'][window_index]
+                P = training_labels['P'][window_index]
+                T = training_labels['T'][window_index]
                 K = training_labels['K'][window_index, :]
-                P_shear = training_labels['sh'][window_index,
-                                                probe_index, probe_index, :]
+                P_sh = training_labels['sh'][window_index,
+                                             probe_index, probe_index, :]
+                P_nasmyth = training_labels['Nasmyth_spec'][window_index,
+                                                            probe_index, :]
                 K_max = training_labels['K_max'][window_index, probe_index]
                 flagood = training_labels['flagood'][window_index, probe_index]
 
@@ -56,103 +57,31 @@ def prepare_training_data(data, dataset, params, filename):
                     continue
 
                 # Compute K_min
-                K_min = find_K_min(epsilon, nu, K, P_shear, K_max)
+                K_min = find_K_min(epsilon, nu, K, P_sh, K_max)
                 K_min_values[window_index, probe_index] = K_min
-
-        # Extract variables for the profile
-        try:
-            P_slow = np.squeeze(profile['P_slow'])
-            JAC_T = np.squeeze(profile['JAC_T'])
-            JAC_C = np.squeeze(profile['JAC_C'])
-            P_fast = np.squeeze(profile['P_fast'])
-            W_slow = np.squeeze(profile['W_slow'])
-            W_fast = np.squeeze(profile['W_fast'])
-            sh1 = np.squeeze(profile['sh1'])
-            sh2 = np.squeeze(profile['sh2'])
-            Ax = np.squeeze(profile['Ax'])
-            Ay = np.squeeze(profile['Ay'])
-            T1_fast = np.squeeze(profile['T1_fast'])
-        except KeyError as e:
-            print(f"Missing expected field in profile {i+1}: {e}")
-            continue
-
-        # Prepare data
-        SH = np.column_stack((sh1, sh2))
-        A = np.column_stack((Ax, Ay))
-        speed = W_fast
-        T = T1_fast
-        P = P_fast
-
-        sigma_theta_fast = compute_density(
-            JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast)
-        N2 = compute_buoyancy_frequency(sigma_theta_fast, P_fast)
-
-        # Set parameters for dissipation calculation
-        fft_length = int(params['fft_length'] * fs_fast)
-        diss_length = int(params['diss_length'] * fs_fast)
-        overlap = int(params['overlap'] * fs_fast)
-        fit_order = params.get('fit_order', 3)
-        f_AA = params.get('f_AA', 98)
-
-        try:
-            # Calculate dissipation rates
-            diss = get_diss_odas_nagai4gui2024(
-                SH=SH,
-                A=A,
-                fft_length=fft_length,
-                diss_length=diss_length,
-                overlap=overlap,
-                fs=fs_fast,
-                speed=speed,
-                T=T,
-                N2=N2,
-                P=P,
-                fit_order=fit_order,
-                f_AA=f_AA,
-                K_max_pred=K_max_values,
-                K_min_pred=K_min_values
-            )
-        except Exception as e:
-            print(f"Error processing profile {i+1}: {e}")
-            continue  # Skip this profile if there's an error
-
-        # Extract spectra and integration ranges
-        num_estimates = diss['e'].shape[0]
-        # print(f"Num estimates training: {num_estimates}")
-        num_probes = SH.shape[1]
-        for index in range(num_estimates):
-            for probe_index in range(num_probes):
-                P_sh = diss['sh'][index,
-                                  probe_index, probe_index, :]
-                K = diss['K'][index, :]  # Wavenumber array
-                epsilon = diss['e'][index, probe_index]
-                K_max = diss['K_max'][index, probe_index]
-                K_min = diss['K_min'][index, probe_index]
-
-                # Generate Nasmyth spectrum with epsilon
-                nu = diss['nu'][index, 0]
-                P_nasmyth, _ = nasmyth(epsilon, nu, K)
 
                 # Create integration range target
                 integration_range = [K_min, K_max]
 
-                # Stack P_sh_clean and P_nasmyth to create multi-channel input
-                # Shape: (spectrum_length, 2)
-                # TODO, FIX NUMBER OF ROWS, P_NASMYTH IS 0 AFTER 101 ITERATIONS
-                spectrum_input = np.stack((P_sh, P_nasmyth), axis=-1)
+                # Normalize K
+                # K_normalized = (K - K.min()) / (K.max() - K.min())
+
+                P_sh = np.real(P_sh)
+                spectrum_input = np.stack(
+                    (P_sh, P_nasmyth, K), axis=-1)
 
                 # Collect scalar features (mean values over the window)
                 scalar_feature = np.array([
                     nu,
                     np.mean(P),
                     np.mean(T),
-                    np.mean(diss['N2'][index, probe_index])
                 ])
 
                 # Store data
                 spectra.append(spectrum_input)
                 scalar_features.append(scalar_feature)
                 integration_ranges.append(integration_range)
+                flagoods.append(flagood)
 
     # Convert lists to numpy arrays
     # Shape: (num_samples, spectrum_length, num_channels)
@@ -161,22 +90,26 @@ def prepare_training_data(data, dataset, params, filename):
     scalar_features = np.array(scalar_features)
     integration_ranges = np.array(
         integration_ranges)  # Shape: (num_samples, 2)
+    flagoods = np.array(flagoods)
+    print(f"flagoods SHAPE: {flagoods.shape}")
 
-    return spectra, scalar_features, integration_ranges
+    return spectra, scalar_features, integration_ranges, flagoods
 
 
 def create_cnn_model(spectrum_input_shape, scalar_input_shape):
     # Spectral Input
-    # print(f"Spectrum input shape: {spectrum_input_shape}")
     spectrum_input = layers.Input(
         shape=spectrum_input_shape, name='spectrum_input')
-    x = layers.Conv1D(64, kernel_size=5, activation='relu')(spectrum_input)
+    x = layers.Conv1D(64, kernel_size=5, activation='relu',
+                      padding='same')(spectrum_input)
     x = layers.BatchNormalization()(x)
     x = layers.MaxPooling1D(pool_size=2)(x)
-    x = layers.Conv1D(128, kernel_size=5, activation='relu')(x)
+
+    x = layers.Conv1D(128, kernel_size=5, activation='relu', padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.MaxPooling1D(pool_size=2)(x)
-    x = layers.Conv1D(256, kernel_size=3, activation='relu')(x)
+
+    x = layers.Conv1D(256, kernel_size=3, activation='relu', padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.GlobalAveragePooling1D()(x)
 
@@ -188,60 +121,98 @@ def create_cnn_model(spectrum_input_shape, scalar_input_shape):
     x = layers.Dense(128, activation='relu')(combined)
     x = layers.Dense(64, activation='relu')(x)
 
-    # Output Layer
-    output = layers.Dense(2, activation='linear')(x)
+    # Output Layers
+    output_integration = layers.Dense(
+        2, activation='linear', name='integration_output')(x)
+    output_flagood = layers.Dense(
+        1, activation='sigmoid', name='flagood_output')(x)
+
+    print(f"output_integration shape: {output_integration.shape}")
+    print(f"output_flagood shape: {output_flagood.shape}")
 
     # Define Model
-    model = models.Model(inputs=[spectrum_input, scalar_input], outputs=output)
+    model = models.Model(inputs=[spectrum_input, scalar_input], outputs={
+        'integration_output': output_integration,
+        'flagood_output': output_flagood
+    })
     return model
 
 
-# TRANSFER LEARNING?
 def train_cnn_model(data, dataset, params, filename, existing_model=None):
-    """
-    Train the CNN model to predict the integration range.
-    """
     # Prepare training data
-    spectra, scalar_features, integration_ranges = prepare_training_data(
+    spectra, scalar_features, integration_ranges, flagoods = prepare_training_data(
         data, dataset, params, filename)
 
     if len(spectra) == 0:
         print("No training data was collected, there was an error in preparing the data")
         return
 
-    # print(f"Spectra shape: {spectra.shape}")
-    # print(f"Scalar features shape: {scalar_features.shape}")
-    # print(f"Integration ranges shape: {integration_ranges.shape}")
-
     # Split data into training and validation sets
-    X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_train, y_val = train_test_split(
-        spectra, scalar_features, integration_ranges, test_size=0.2, random_state=42
+    X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_integration_train, y_integration_val, y_flagood_train, y_flagood_val = train_test_split(
+        spectra, scalar_features, integration_ranges, flagoods, test_size=0.2, random_state=42
     )
+
+    # Reshape y_flagood to have shape (batch_size, 1)
+    y_flagood_train = y_flagood_train.reshape(-1, 1)
+    y_flagood_val = y_flagood_val.reshape(-1, 1)
+
+    # Print shapes for verification
+    print(f"X_spectrum_train shape: {X_spectrum_train.shape}")
+    print(f"X_scalar_train shape: {X_scalar_train.shape}")
+    print(f"y_integration_train shape: {y_integration_train.shape}")
+    print(f"y_flagood_train shape: {y_flagood_train.shape}")
 
     if existing_model is not None:
         model = existing_model
         print("Continuing training of existing model...")
     else:
         # Create CNN model
-        spectrum_input_shape = (spectra.shape[1], spectra.shape[2])
-        scalar_input_shape = (scalar_features.shape[1],)
+        spectrum_input_shape = (
+            X_spectrum_train.shape[1], X_spectrum_train.shape[2])
+        scalar_input_shape = (X_scalar_train.shape[1],)
         model = create_cnn_model(spectrum_input_shape, scalar_input_shape)
         print("New model created.")
+        model.summary()
 
     # Compile the model
-    model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+    model.compile(
+        optimizer='adam',
+        loss={
+            'integration_output': 'mean_squared_error',
+            'flagood_output': 'binary_crossentropy'
+        },
+        loss_weights={
+            'integration_output': 1.0,
+            'flagood_output': 1.0
+        },
+        metrics={
+            'integration_output': ['mae'],
+            'flagood_output': ['accuracy']
+        }
+    )
 
     # Train the model
-    early_stopping = callbacks.EarlyStopping(monitor='val_loss', patience=10)
+    early_stopping = callbacks.EarlyStopping(
+        monitor='val_loss', patience=10, restore_best_weights=True)
+
     history = model.fit(
-        [X_spectrum_train, X_scalar_train], y_train,
-        validation_data=([X_spectrum_val, X_scalar_val], y_val),
+        [X_spectrum_train, X_scalar_train],
+        {
+            'integration_output': y_integration_train,
+            'flagood_output': y_flagood_train
+        },
+        validation_data=(
+            [X_spectrum_val, X_scalar_val],
+            {
+                'integration_output': y_integration_val,
+                'flagood_output': y_flagood_val
+            }
+        ),
         epochs=100,
         batch_size=32,
         callbacks=[early_stopping]
     )
 
-    # Optionally, plot training history
     plot_training_history(history)
 
     return model

@@ -105,24 +105,59 @@ def generate_reference_nasmyth_spectra(K):
 
 
 def plot_training_history(history):
-    plt.figure(figsize=(10, 4))
-    # Plot loss
-    plt.subplot(1, 2, 1)
-    plt.plot(history.history['loss'], label='Train Loss')
-    plt.plot(history.history['val_loss'], label='Val Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Model Loss')
-    plt.legend()
+    import matplotlib.pyplot as plt
 
-    # Plot MAE
-    plt.subplot(1, 2, 2)
-    plt.plot(history.history['mae'], label='Train MAE')
-    plt.plot(history.history['val_mae'], label='Val MAE')
-    plt.xlabel('Epoch')
-    plt.ylabel('Mean Absolute Error')
-    plt.title('Model MAE')
-    plt.legend()
+    # Extract the history data
+    history_dict = history.history
+
+    # Create subplots for losses and metrics
+    fig, axs = plt.subplots(2, 3, figsize=(16, 10))
+
+    # Plot overall loss
+    axs[0, 0].plot(history_dict['loss'], label='Train Loss')
+    axs[0, 0].plot(history_dict['val_loss'], label='Val Loss')
+    axs[0, 0].set_xlabel('Epoch')
+    axs[0, 0].set_ylabel('Loss')
+    axs[0, 0].set_title('Overall Loss')
+    axs[0, 0].legend()
+
+    # Plot loss for integration_output
+    axs[0, 1].plot(history_dict['integration_output_loss'], label='Train Loss')
+    axs[0, 1].plot(history_dict['val_integration_output_loss'],
+                   label='Val Loss')
+    axs[0, 1].set_xlabel('Epoch')
+    axs[0, 1].set_ylabel('Loss')
+    axs[0, 1].set_title('Integration Output Loss')
+    axs[0, 1].legend()
+
+    # Plot loss for flagood_output
+    axs[0, 2].plot(history_dict['flagood_output_loss'], label='Train Loss')
+    axs[0, 2].plot(history_dict['val_flagood_output_loss'], label='Val Loss')
+    axs[0, 2].set_xlabel('Epoch')
+    axs[0, 2].set_ylabel('Loss')
+    axs[0, 2].set_title('Flagood Output Loss')
+    axs[0, 2].legend()
+
+    # Plot metrics for integration_output (MAE)
+    axs[1, 0].plot(history_dict['integration_output_mae'], label='Train MAE')
+    axs[1, 0].plot(history_dict['val_integration_output_mae'], label='Val MAE')
+    axs[1, 0].set_xlabel('Epoch')
+    axs[1, 0].set_ylabel('Mean Absolute Error')
+    axs[1, 0].set_title('Integration Output MAE')
+    axs[1, 0].legend()
+
+    # Plot accuracy for flagood_output
+    axs[1, 1].plot(history_dict['flagood_output_accuracy'],
+                   label='Train Accuracy')
+    axs[1, 1].plot(history_dict['val_flagood_output_accuracy'],
+                   label='Val Accuracy')
+    axs[1, 1].set_xlabel('Epoch')
+    axs[1, 1].set_ylabel('Accuracy')
+    axs[1, 1].set_title('Flagood Output Accuracy')
+    axs[1, 1].legend()
+
+    # Hide the last subplot (if not used)
+    axs[1, 2].axis('off')
 
     plt.tight_layout()
     plt.show()

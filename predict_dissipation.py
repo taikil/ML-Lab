@@ -134,7 +134,7 @@ def extract_output_labels(diss):
     """
     # List of variables to extract from 'diss'
     output_variables = ['e', 'nu', 'sh',
-                        'K_max', 'K', 'Nasmyth_spec', 'flagood']
+                        'K_max', 'K', 'Nasmyth_spec', 'flagood', 'P', 'T']
 
     # Dictionary to store the extracted variables
     output_labels = {}
@@ -240,7 +240,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     fit_order = params.get('fit_order', 3)
     f_AA = params.get('f_AA', 98)
 
-    # Estimate epsilon
+    # Initial estimate epsilon
     diss = get_diss_odas_nagai4gui2024(
         SH=SH,
         A=A,
@@ -268,12 +268,11 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
         for probe_index in range(num_probes):
             # Extract data for this window and probe
             epsilon = diss['e'][index, probe_index]
-            K_max = diss['K_max'][index, probe_index]
             K = diss['K'][index, :]   # Shape: (1025,)
-            P_sh_clean = diss['sh_clean'][index, probe_index, probe_index, :]
+            P_sh = diss['sh'][index, probe_index, probe_index, :]
 
             # Prepare input for the CNN
-            spectrum_input = P_sh_clean.reshape(
+            spectrum_input = P_sh.reshape(
                 1, -1, 1)  # Reshape for CNN input
 
             # Generate Nasmyth spectrum with epsilon
@@ -282,7 +281,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
 
             # Prepare spectral input
             # Shape: (spectrum_length, 2)
-            spectrum_input = np.stack((P_sh_clean, P_nasmyth), axis=-1)
+            spectrum_input = np.stack((P_sh, P_nasmyth, K), axis=-1)
             # Add batch dimension
             spectrum_input = spectrum_input[np.newaxis, ...]
 
@@ -291,17 +290,21 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
                 nu,
                 np.mean(P),
                 np.mean(T),
-                np.mean(diss['N2'][index, probe_index])
             ])
             # Add batch dimension
             scalar_feature = scalar_feature[np.newaxis, :]
 
             # Predict integration range using the CNN
-            predicted_range = model.predict([spectrum_input, scalar_feature])
+            outputs = model.predict(
+                [spectrum_input, scalar_feature])
+            predicted_range = outputs['integration_output']
+            flagood_pred = outputs['flagood_output']
             K_min_pred, K_max_pred = predicted_range[0]
+            flagood_pred = flagood_pred[0][0]
 
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
+            diss['flagood'][index, probe_index] = flagood_pred
 
             # kinematic viscosity
             nu = diss['nu'][index, 0]
@@ -315,10 +318,10 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             idx_integration = np.where(
                 (K >= K_min_pred) & (K <= K_max_pred))[0]
             e_final = 7.5 * nu * \
-                np.trapz(P_sh_clean[idx_integration],
+                np.trapz(P_sh[idx_integration],
                          K[idx_integration])
             epsilon_cnn = 7.5 * nu * \
-                np.trapz(P_sh_clean[idx_integration],
+                np.trapz(P_sh[idx_integration],
                          K[idx_integration])
 
             # Update epsilon in the diss dictionary
@@ -336,8 +339,8 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
                 f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
 
             K = diss['K'][index, :]
-            P_sh_clean = diss['sh_clean'][index,
-                                          probe_index, probe_index, :]
+            P_sh = diss['sh'][index,
+                              probe_index, probe_index, :]
             P_nasmyth = diss['Nasmyth_spec'][index, probe_index, :]
             epsilon_cnn = diss['e'][index, probe_index]
             K_min_pred = diss['K_min'][index, probe_index]
@@ -346,7 +349,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             # Prepare data for plotting
             plot_data = {
                 'k_obs': K,
-                'P_shear_obs': P_sh_clean,
+                'P_shear_obs': P_sh,
                 'P_nasmyth': P_nasmyth,
                 'best_k_range': [K_min_pred, K_max_pred],
                 'best_epsilon': epsilon_cnn,
