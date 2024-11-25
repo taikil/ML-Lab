@@ -2,7 +2,6 @@ from keras import models
 import sys
 import numpy as np
 import scipy.io
-from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
 from scipy.optimize import brentq
 from diss_rate_odas_nagai import *
@@ -279,9 +278,16 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             nu = diss['nu'][index, 0]
             P_nasmyth, _ = nasmyth(epsilon, nu, K)
 
+            # Normalize
+            K_normalized = (K - K.min()) / (K.max() - K.min())
+            P_sh = np.real(P_sh)
+            P_sh_log = np.log10(P_sh + 1e-10)
+            P_nasmyth_log = np.log10(P_nasmyth + 1e-10)
+
             # Prepare spectral input
             # Shape: (spectrum_length, 2)
-            spectrum_input = np.stack((P_sh, P_nasmyth, K), axis=-1)
+            spectrum_input = np.stack(
+                (P_sh_log, P_nasmyth_log, K_normalized), axis=-1)
             # Add batch dimension
             spectrum_input = spectrum_input[np.newaxis, ...]
 
@@ -304,7 +310,10 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
 
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
-            diss['flagood'][index, probe_index] = flagood_pred
+            if flagood_pred <= 0.1:
+                diss['flagood'][index, probe_index] = 0
+            else:
+                diss['flagood'][index, probe_index] = 1
 
             # kinematic viscosity
             nu = diss['nu'][index, 0]
@@ -364,11 +373,11 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     return diss
 
 
-def save_dissipation_rate(diss_results, profile_num):
+def save_dissipation_rate(filename, diss_results, profile_num):
     """
     Save the dissipation rate data to a .mat file.
     """
-    filename = f'dissrate_profile_{profile_num}.mat'
+    filename = f'{filename[:-4]}_dissrate_profile_{profile_num}.mat'
     data = {'diss': diss_results}
     scipy.io.savemat(filename, data)
     print(f"Dissipation rate saved to {filename}")
@@ -460,7 +469,7 @@ def main():
 
     diss = process_profile(data, dataset, params, profile_num, model)
 
-    save_dissipation_rate(diss, profile_num + 1)
+    save_dissipation_rate(FILENAME, diss, profile_num + 1)
 
     print("Processing completed successfully.")
 

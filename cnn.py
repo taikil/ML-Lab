@@ -1,9 +1,8 @@
 from keras import callbacks, layers, models
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from predict_dissipation import extract_output_labels, load_output_data, find_K_min
 from display_graph import nasmyth, plot_training_history
-from diss_rate_odas_nagai import get_diss_odas_nagai4gui2024, nasmyth
-from helper import compute_buoyancy_frequency, compute_density
 import numpy as np
 
 
@@ -63,12 +62,15 @@ def prepare_training_data(data, dataset, params, filename):
                 # Create integration range target
                 integration_range = [K_min, K_max]
 
-                # Normalize K
-                # K_normalized = (K - K.min()) / (K.max() - K.min())
-
+                # Normalize values
+                K_normalized = (K - K.min()) / (K.max() - K.min())
+                # Add a small value to avoid log(0)
                 P_sh = np.real(P_sh)
+                P_sh_log = np.log10(P_sh + 1e-10)
+                P_nasmyth_log = np.log10(P_nasmyth + 1e-10)
+
                 spectrum_input = np.stack(
-                    (P_sh, P_nasmyth, K), axis=-1)
+                    (P_sh_log, P_nasmyth_log, K_normalized), axis=-1)
 
                 # Collect scalar features (mean values over the window)
                 scalar_feature = np.array([
