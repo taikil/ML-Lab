@@ -53,52 +53,47 @@ def clean(A, U, n_fft, rate):
     if not isinstance(rate, (int, float)) or rate <= 0:
         raise ValueError('Sampling rate must be a positive scalar')
 
-    # Spectral estimation parameters
-    window = 'hann'
+    window = np.hanning(n_fft)
     n_overlap = n_fft // 2
-    n_freqs = n_fft // 2 + 1
+    scaling = 'density'
+    detrend = False
 
     # Number of accelerometers and shear probes
     n_samples, n_accel = A.shape
     _, n_shear = U.shape
 
     # Pre-allocate matrices for spectra
-    AA = np.zeros((n_accel, n_accel, n_freqs), dtype=np.complex128)
-    UU = np.zeros((n_shear, n_shear, n_freqs), dtype=np.complex128)
-    UA = np.zeros((n_shear, n_accel, n_freqs), dtype=np.complex128)
+    AA = np.zeros((n_accel, n_accel, n_fft // 2 + 1), dtype=np.complex128)
+    UU = np.zeros((n_shear, n_shear, n_fft // 2 + 1), dtype=np.complex128)
+    UA = np.zeros((n_shear, n_accel, n_fft // 2 + 1), dtype=np.complex128)
 
     # Compute acceleration auto- and cross-spectra
     for i in range(n_accel):
-        # Auto-spectrum for accelerometer i
-        f, Paa = csd(A[:, i], A[:, i], fs=rate, nperseg=n_fft,
-                     noverlap=n_overlap, window=window)
+        f, Paa = csd(A[:, i], A[:, i], fs=rate, window=window,
+                     nperseg=n_fft, noverlap=n_overlap, scaling=scaling, detrend=detrend)
         AA[i, i, :] = Paa
         for j in range(i + 1, n_accel):
-            # Cross-spectrum between accelerometers i and j
-            _, Paa_cross = csd(A[:, i], A[:, j], fs=rate,
-                               nperseg=n_fft, noverlap=n_overlap, window=window)
+            _, Paa_cross = csd(A[:, i], A[:, j], fs=rate, window=window,
+                               nperseg=n_fft, noverlap=n_overlap, scaling=scaling, detrend=detrend)
             AA[i, j, :] = Paa_cross
             AA[j, i, :] = np.conj(Paa_cross)
 
     # Compute shear probe auto- and cross-spectra
     for i in range(n_shear):
-        # Auto-spectrum for shear probe i
-        _, Puu = csd(U[:, i], U[:, i], fs=rate, nperseg=n_fft,
-                     noverlap=n_overlap, window=window)
+        _, Puu = csd(U[:, i], U[:, i], fs=rate, window=window,
+                     nperseg=n_fft, noverlap=n_overlap, scaling=scaling, detrend=detrend)
         UU[i, i, :] = Puu
         for j in range(i + 1, n_shear):
-            # Cross-spectrum between shear probes i and j
-            _, Puu_cross = csd(U[:, i], U[:, j], fs=rate,
-                               nperseg=n_fft, noverlap=n_overlap, window=window)
+            _, Puu_cross = csd(U[:, i], U[:, j], fs=rate, window=window,
+                               nperseg=n_fft, noverlap=n_overlap, scaling=scaling, detrend=detrend)
             UU[i, j, :] = Puu_cross
             UU[j, i, :] = np.conj(Puu_cross)
 
     # Compute cross-spectra between shear probes and accelerometers
     for i in range(n_shear):
         for j in range(n_accel):
-            # Cross-spectrum between shear probe i and accelerometer j
-            _, Pua = csd(U[:, i], A[:, j], fs=rate, nperseg=n_fft,
-                         noverlap=n_overlap, window=window)
+            _, Pua = csd(U[:, i], A[:, j], fs=rate, window=window,
+                         nperseg=n_fft, noverlap=n_overlap, scaling=scaling, detrend=detrend)
             UA[i, j, :] = Pua
 
     # Initialize clean shear spectra
@@ -106,26 +101,33 @@ def clean(A, U, n_fft, rate):
 
     # Clean the shear spectra at each frequency
     for idx in range(len(f)):
-        # Extract spectra at the current frequency
         UU_freq = UU[:, :, idx]
         UA_freq = UA[:, :, idx]
         AA_freq = AA[:, :, idx]
 
-        # Invert AA_freq matrix (acceleration cross-spectra matrix)
-        try:
-            AA_inv = np.linalg.inv(AA_freq)
-            # Compute the term to subtract
-            term = UA_freq @ AA_inv @ UA_freq.conj().T
-            # Cleaned shear spectra at this frequency
-            clean_UU[:, :, idx] = UU_freq - term
-        except np.linalg.LinAlgError:
-            # If AA is singular, skip cleaning at this frequency
-            clean_UU[:, :, idx] = UU_freq
+        # Use pseudoinverse to handle singular matrices
+        AA_inv = np.linalg.pinv(AA_freq)
+        term = UA_freq @ AA_inv @ UA_freq.conj().T
+        clean_UU[:, :, idx] = UU_freq - term
 
-    # Remove any singleton dimensions and take the real part
-    clean_UU = np.real(np.squeeze(clean_UU))
-    UU = np.real(np.squeeze(UU))
-    AA = np.real(np.squeeze(AA))
+    # Remove singleton dimensions
+    clean_UU = np.squeeze(clean_UU)
+    clean_UU = np.real(clean_UU)
+    UU = np.squeeze(UU)
+    n_shear, _, n_freqs = UU.shape
+    with open('UU_output.txt', 'w') as file:
+        for freq_idx in range(n_freqs):
+            file.write(f"Frequency Index {freq_idx}:\n")
+            for i in range(n_shear):
+                row = ''
+                for j in range(n_shear):
+                    val = UU[i, j, freq_idx]
+                    # Format complex number
+                    val_str = f"{val.real:+.6e} {val.imag:+.6e}i"
+                    row += val_str + '\t'
+                file.write(row.strip() + '\n')
+            file.write('\n')
+    AA = np.squeeze(AA)
     UA = np.squeeze(UA)
 
     return clean_UU, AA, UU, UA, f

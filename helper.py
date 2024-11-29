@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import interp1d
 import gsw  # Gibbs SeaWater Oceanographic Package of TEOS-10
-from scipy.signal import butter, filtfilt, medfilt
+from scipy.signal import butter, filtfilt, wiener
 
 
 def wiener(dw_dx, az, N):
@@ -72,6 +72,38 @@ def wiener(dw_dx, az, N):
     return w, dw_dx_clean
 
 
+def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
+    """
+    Despike and apply high-pass and band-pass filters to shear data.
+
+    Returns:
+    - sh1_HP, sh2_HP: High-pass filtered shear data.
+    - sh1_BP, sh2_BP: Band-pass filtered shear data (for plotting).
+    """
+    N = 15  # Number of Wiener filter weights
+
+    # Apply Wiener filter to remove acceleration-coherent noise
+    _, sh1_clean = wiener(sh1[n], Ax[n], N)
+    _, sh1_clean = wiener(sh1_clean, Ay[n], N)
+    _, sh2_clean = wiener(sh2[n], Ax[n], N)
+    _, sh2_clean = wiener(sh2_clean, Ay[n], N)
+
+    np.savetxt("sh1_wiener.txt", sh1_clean, fmt='%.6e')
+    # High-pass filter
+    HP_cut = params['HP_cut']
+    b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')
+    sh1_HP = filtfilt(b_hp, a_hp, sh1_clean, padtype='even')
+    sh2_HP = filtfilt(b_hp, a_hp, sh2_clean, padtype='even')
+
+    # Low-pass filter to obtain band-pass filtered data
+    LP_cut = params['LP_cut']
+    b_lp, a_lp = butter(4, LP_cut / (fs_fast / 2), btype='low')
+    sh1_BP = filtfilt(b_lp, a_lp, sh1_HP, padtype='even')
+    sh2_BP = filtfilt(b_lp, a_lp, sh2_HP, padtype='even')
+
+    return sh1_BP, sh2_BP, sh1_BP, sh2_BP
+
+
 def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):
     """
     Compute the potential density sigma_theta at the fast sampling rate.
@@ -128,26 +160,3 @@ def moving_average(data, window_size):
     Compute the moving average of the data.
     """
     return np.convolve(data, np.ones(window_size)/window_size, mode='same')
-
-
-def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
-    """
-    Despike and apply high-pass filter to shear data.
-    """
-    N = 15  # Number of wiener filter weights
-
-    # Apply Wiener filter to remove acceleration-coherent noise
-    _, sh1_clean = wiener(sh1[n], Ax[n], N)
-    _, sh1_clean = wiener(sh1_clean, Ay[n], N)
-    _, sh2_clean = wiener(sh2[n], Ax[n], N)
-    _, sh2_clean = wiener(sh2_clean, Ay[n], N)
-
-    # High-pass filter
-    HP_cut = params['HP_cut']
-    b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')
-    padlen = min(20, len(sh1_clean) - 1)
-
-    sh1_HP = filtfilt(b_hp, a_hp, sh1_clean, padlen=padlen)
-    sh2_HP = filtfilt(b_hp, a_hp, sh2_clean, padlen=padlen)
-
-    return sh1_HP, sh2_HP

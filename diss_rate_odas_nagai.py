@@ -57,10 +57,14 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
     diss['K_max'] = np.zeros_like(diss['e'])
     diss['method'] = np.zeros_like(diss['e'])
     diss['Nasmyth_spec'] = np.zeros((number_of_rows, num_probes, F_length))
-    diss['sh'] = np.zeros((number_of_rows, num_probes, num_probes, F_length))
+    # diss['sh'] = np.zeros((number_of_rows, num_probes, num_probes, F_length))
+    diss['sh'] = np.zeros(
+        (number_of_rows, num_probes, num_probes, F_length), dtype=np.complex128)
     diss['sh_clean'] = np.zeros_like(diss['sh'])
-    diss['AA'] = np.zeros((number_of_rows, A.shape[1], A.shape[1], F_length))
-    diss['UA'] = np.zeros((number_of_rows, num_probes, A.shape[1], F_length))
+    diss['AA'] = np.zeros(
+        (number_of_rows, A.shape[1], A.shape[1], F_length), dtype=np.complex128)
+    diss['UA'] = np.zeros(
+        (number_of_rows, num_probes, A.shape[1], F_length), dtype=np.complex128)
     diss['F'] = np.zeros((number_of_rows, F_length))
     diss['K'] = np.zeros_like(diss['F'])
     diss['speed'] = np.zeros((number_of_rows, 1))
@@ -99,6 +103,20 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
 
         P_sh_clean *= W * correction
         P_sh *= W * correction
+
+        n_shear, _, n_freqs = P_sh.shape
+        with open('P_sh_output.txt', 'w') as file:
+            for freq_idx in range(n_freqs):
+                file.write(f"Frequency Index {freq_idx}:\n")
+                for i in range(n_shear):
+                    row = ''
+                    for j in range(n_shear):
+                        val = P_sh[i, j, freq_idx]
+                        # Format complex number
+                        val_str = f"{val.real:+.6e} {val.imag:+.6e}i"
+                        row += val_str + '\t'
+                    file.write(row.strip() + '\n')
+                file.write('\n')
 
         e = np.zeros(num_probes)
         K_max = np.zeros(num_probes)
@@ -407,7 +425,7 @@ def variance_method(K, shear_spectrum, e_1, nu, K_AA, fit_order):
         e_new = e_3 / variance_resolved
         if e_new / e_old < 1.02:
             e_3 = e_new
-            e_3 = float(e_3)
+            # e_3 = float(e_3)
             break
 
     # Correct for missing variance at low end

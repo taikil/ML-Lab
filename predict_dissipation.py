@@ -41,10 +41,14 @@ def load_mat_file(filename):
         mat_contents = hdf5storage.loadmat(filename)
         data = mat_contents.get('data', None)
         dataset = mat_contents.get('dataset', None)
-        if data is None or dataset is None:
+        print("Keys in mat_contents:", mat_contents.keys())
+        if 'data' in mat_contents and 'dataset' in mat_contents:
+            data = mat_contents['data']
+            dataset = mat_contents['dataset']
+            return data, dataset
+        else:
             raise ValueError(
-                "The .mat file does not contain both 'data' and 'dataset' variables.")
-        return data, dataset
+                "The .mat file does not contain 'data' and 'dataset' variables.")
 
 
 def process_profile(data, dataset, params, profile_num=0, model=None):
@@ -94,7 +98,8 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     range1 = n[nn]  # Subset of fast data based on pressure
 
     # Despike and filter shear data
-    sh1_HP, sh2_HP = despike_and_filter_sh(
+
+    sh1_HP, sh2_HP, sh1_BP, sh2_BP = despike_and_filter_sh(
         sh1, sh2, Ax, Ay, range1, fs_fast, params)
 
     diss = calculate_dissipation_rate(
@@ -185,26 +190,10 @@ def find_K_min(epsilon, nu, K, P_shear, K_max):
 
     # Check if the function changes sign over the interval, if not K_min will be 0
     if func(K_min_lower) * func(K_min_upper) > 0:
-        # print("Cannot find a valid K_min in the given range.")
-        # print(
-        #     f"func(K_min_lower): {func(K_min_lower)}, func(K_min_upper): {func(K_min_upper)}")
-        # print(K_max)
-        # print(K)
-        # print(P_shear)
         return 0
 
     # Solve for K_min
     K_min_solution = brentq(func, K_min_lower, K_min_upper)
-
-    # For testing results only
-    # cumulative_integral = cumtrapz(P_shear, K, initial=0)
-    # integral_interp = interp1d(
-    #     K, cumulative_integral, kind='linear', fill_value="extrapolate")
-    # integral_value = integral_interp(K_max) - integral_interp(K_min_solution)
-    # epsilon_calc = 7.5 * nu * integral_value
-
-    # print(
-    #     f" K_min: {K_min_solution}, Original epsilon: {epsilon}, Recalculated epsilon: {epsilon_calc}")
 
     return K_min_solution
 
@@ -231,6 +220,8 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     speed = W_fast
     T = T1_fast
     P = P_fast
+
+    np.savetxt("sh_diss.txt", SH, fmt='%.6e')
 
     # Set parameters for dissipation calculation
     fft_length = int(params['fft_length'] * fs_fast)
@@ -310,10 +301,12 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
 
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
-            if flagood_pred <= 0.1:
-                diss['flagood'][index, probe_index] = 0
-            else:
-                diss['flagood'][index, probe_index] = 1
+            # if flagood_pred <= 0.1:
+            #     diss['flagood'][index, probe_index] = 0
+            # else:
+            #     diss['flagood'][index, probe_index] = 1
+
+            diss['flagood'][index, probe_index] = flagood_pred
 
             # kinematic viscosity
             nu = diss['nu'][index, 0]
@@ -326,9 +319,6 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             print(f"K_MIN PRED FOR INTEGRATION: {K_min_pred}")
             idx_integration = np.where(
                 (K >= K_min_pred) & (K <= K_max_pred))[0]
-            e_final = 7.5 * nu * \
-                np.trapz(P_sh[idx_integration],
-                         K[idx_integration])
             epsilon_cnn = 7.5 * nu * \
                 np.trapz(P_sh[idx_integration],
                          K[idx_integration])
@@ -345,11 +335,9 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             diss['Krho'][index, probe_index] = 0.2 * epsilon_cnn / N2_mean
 
             print(
-                f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {e_final:.2e} W/kg")
+                f"Window {index}, Probe {probe_index}, Final dissipation rate after CNN integration range: {epsilon_cnn:.2e} W/kg")
 
             K = diss['K'][index, :]
-            P_sh = diss['sh'][index,
-                              probe_index, probe_index, :]
             P_nasmyth = diss['Nasmyth_spec'][index, probe_index, :]
             epsilon_cnn = diss['e'][index, probe_index]
             K_min_pred = diss['K_min'][index, probe_index]
