@@ -89,19 +89,22 @@ def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
     _, sh2_clean = wiener(sh2_clean, Ay[n], N)
 
     np.savetxt("sh1_wiener.txt", sh1_clean, fmt='%.6e')
-    # High-pass filter
-    HP_cut = params['HP_cut']
-    b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')
-    sh1_HP = filtfilt(b_hp, a_hp, sh1_clean, padtype='even')
-    sh2_HP = filtfilt(b_hp, a_hp, sh2_clean, padtype='even')
+    # # High-pass filter
+    # HP_cut = params['HP_cut']
+    # b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')
+    # sh1_HP = filtfilt(b_hp, a_hp, sh1_clean, padtype='even')
+    # sh2_HP = filtfilt(b_hp, a_hp, sh2_clean, padtype='even')
 
-    # Low-pass filter to obtain band-pass filtered data
-    LP_cut = params['LP_cut']
-    b_lp, a_lp = butter(4, LP_cut / (fs_fast / 2), btype='low')
-    sh1_BP = filtfilt(b_lp, a_lp, sh1_HP, padtype='even')
-    sh2_BP = filtfilt(b_lp, a_lp, sh2_HP, padtype='even')
+    # print("First few elements of sh1_HP in Python:")
+    # print(sh1_HP[:10])
 
-    return sh1_BP, sh2_BP, sh1_BP, sh2_BP
+    # # Low-pass filter to obtain band-pass filtered data
+    # LP_cut = params['LP_cut']
+    # b_lp, a_lp = butter(4, LP_cut / (fs_fast / 2), btype='low')
+    # sh1_BP = filtfilt(b_lp, a_lp, sh1_HP, padtype='even')
+    # sh2_BP = filtfilt(b_lp, a_lp, sh2_HP, padtype='even')
+
+    return sh1_clean, sh2_clean
 
 
 def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):

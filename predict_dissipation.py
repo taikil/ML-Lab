@@ -99,7 +99,7 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
 
     # Despike and filter shear data
 
-    sh1_HP, sh2_HP, sh1_BP, sh2_BP = despike_and_filter_sh(
+    sh1_HP, sh2_HP = despike_and_filter_sh(
         sh1, sh2, Ax, Ay, range1, fs_fast, params)
 
     diss = calculate_dissipation_rate(
