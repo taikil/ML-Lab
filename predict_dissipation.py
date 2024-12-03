@@ -311,9 +311,6 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
             # kinematic viscosity
             nu = diss['nu'][index, 0]
 
-            # Generate the Nasmyth spectrum with epsilon
-            P_nasmyth, _ = nasmyth(epsilon, nu, K)
-
             # Calculate the final dissipation rate using the CNN-predicted integration range
             print(f"K_MAX PRED FOR INTEGRATION: {K_max_pred}")
             print(f"K_MIN PRED FOR INTEGRATION: {K_min_pred}")
@@ -352,6 +349,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
                 'best_epsilon': epsilon_cnn,
                 'window_index': index,
                 'probe_index': probe_index,
+                'nu': nu
             }
             spectra_data.append(plot_data)
 

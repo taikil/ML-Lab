@@ -29,7 +29,10 @@ def plot_spectra_interactive(spectra_data):
 
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(10, 6))
-    plt.subplots_adjust(bottom=0.2)  # Adjust to make room for buttons
+    plt.subplots_adjust(bottom=0.25)  # Adjust to make room for buttons
+    integration_clicks = {'click_count': 0, 'k_start': None, 'k_end': None}
+    selecting_range = False  # Flag to indicate if we're selecting a new range
+    instruction_text = None  # To store the instruction text object
 
     # Function to update plot
     def update_plot(index):
@@ -42,6 +45,7 @@ def plot_spectra_interactive(spectra_data):
         best_epsilon = data['best_epsilon']
         window_index = data['window_index']
         probe_index = data['probe_index']
+        nu = data['nu']
 
         # Plot observed shear spectrum
         ax.loglog(k_obs, P_shear_obs, linewidth=0.7,
@@ -69,26 +73,141 @@ def plot_spectra_interactive(spectra_data):
             f'Shear Spectrum Fit (Window {window_index}, Probe {probe_index})')
         ax.legend()
         ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+        # If instruction text exists, redraw it
+        if instruction_text is not None:
+            ax.text(0.5, 0.95, instruction_text.get_text(), transform=ax.transAxes,
+                    fontsize=12, color='blue', ha='center', va='top')
+
         fig.canvas.draw_idle()
+
+    # Function to recompute epsilon and update the plot
+    def recompute_epsilon(index):
+        data = spectra_data[index]
+        k_obs = data['k_obs']
+        P_shear_obs = data['P_shear_obs']
+        nu = data['nu']
+        k_start = integration_clicks['k_start']
+        k_end = integration_clicks['k_end']
+
+        # Update best_k_range
+        data['best_k_range'] = [k_start, k_end]
+
+        # Recompute best_epsilon using the new integration range
+        # Implement your method to compute epsilon here
+        # For example:
+        data['best_epsilon'] = compute_epsilon(
+            k_obs, P_shear_obs, nu, k_start, k_end)
+
+        # Recompute Nasmyth spectrum with new epsilon
+        data['P_nasmyth'], _ = nasmyth(data['best_epsilon'], nu, k_obs)
+
+        # Update the plot
+        update_plot(index)
+
+    # Define click event handler
+    def on_click(event):
+        nonlocal selecting_range, instruction_text
+        if not selecting_range:
+            return  # Ignore clicks if not selecting range
+
+        # Only consider clicks within the plot area
+        if event.inaxes != ax:
+            return
+
+        # Get the x-coordinate of the click (wavenumber)
+        k_click = event.xdata
+
+        if k_click is None:
+            return
+
+        # Update click count and integration range
+        if integration_clicks['click_count'] == 0:
+            integration_clicks['k_start'] = k_click
+            integration_clicks['click_count'] = 1
+            print(f"Selected integration range start: {k_click:.2f} cpm")
+        elif integration_clicks['click_count'] == 1:
+            integration_clicks['k_end'] = k_click
+            integration_clicks['click_count'] = 2
+            print(f"Selected integration range end: {k_click:.2f} cpm")
+
+            # Ensure k_start < k_end
+            if integration_clicks['k_start'] > integration_clicks['k_end']:
+                integration_clicks['k_start'], integration_clicks['k_end'] = integration_clicks['k_end'], integration_clicks['k_start']
+
+            # Recompute epsilon and update plot
+            recompute_epsilon(plot_idx['current'])
+
+            # Reset click count for next adjustment
+            integration_clicks['click_count'] = 0
+            selecting_range = False  # Disable range selection
+
+            # Remove instruction text
+            if instruction_text is not None:
+                instruction_text.remove()
+                instruction_text = None
+
+            fig.canvas.draw_idle()
+        else:
+            # Reset if more than two clicks
+            integration_clicks['click_count'] = 0
 
     # Define button callbacks
     def next_plot(event):
+        nonlocal selecting_range, instruction_text
         if plot_idx['current'] < num_plots - 1:
             plot_idx['current'] += 1
             update_plot(plot_idx['current'])
+            # Reset selection
+            selecting_range = False
+            if instruction_text is not None:
+                instruction_text.remove()
+                instruction_text = None
 
     def prev_plot(event):
+        nonlocal selecting_range, instruction_text
         if plot_idx['current'] > 0:
             plot_idx['current'] -= 1
             update_plot(plot_idx['current'])
+            # Reset selection
+            selecting_range = False
+            if instruction_text is not None:
+                instruction_text.remove()
+                instruction_text = None
+
+    def reselect_range(event):
+        nonlocal selecting_range, instruction_text
+        selecting_range = True
+        integration_clicks['click_count'] = 0
+        integration_clicks['k_start'] = None
+        integration_clicks['k_end'] = None
+
+        # Remove previous instruction text if it exists
+        if instruction_text is not None:
+            instruction_text.remove()
+
+        # Display instruction text
+        instruction = 'First click K_min, second click K_max'
+        instruction_text = ax.text(0.5, 0.95, instruction, transform=ax.transAxes,
+                                   fontsize=12, color='blue', ha='center', va='top')
+
+        fig.canvas.draw_idle()
 
     # Add buttons
-    axprev = plt.axes([0.7, 0.05, 0.1, 0.075])
-    axnext = plt.axes([0.81, 0.05, 0.1, 0.075])
-    bnext = Button(axnext, 'Next')
+    axprev = plt.axes([0.5, 0.05, 0.1, 0.075])
+    axnext = plt.axes([0.61, 0.05, 0.1, 0.075])
+    axreselect = plt.axes([0.72, 0.05, 0.15, 0.075])
+
     bprev = Button(axprev, 'Previous')
-    bnext.on_clicked(next_plot)
+    bnext = Button(axnext, 'Next')
+    breselect = Button(axreselect, 'Reselect Range')
+
     bprev.on_clicked(prev_plot)
+    bnext.on_clicked(next_plot)
+    breselect.on_clicked(reselect_range)
+
+    # Connect the click event handler
+    fig.canvas.mpl_connect('button_press_event', on_click)
 
     # Initial plot
     update_plot(plot_idx['current'])
@@ -102,6 +221,15 @@ def generate_reference_nasmyth_spectra(K):
         P_nasmyth, _ = nasmyth(e, 1e-6, K)
         p00_list.append(P_nasmyth)
     return p00_list, K
+
+
+def compute_epsilon(K, P_sh, nu, k_max, k_min):
+    idx_integration = np.where(
+        (K >= k_min) & (K <= k_max))[0]
+    epsilon = 7.5 * nu * \
+        np.trapz(P_sh[idx_integration],
+                 K[idx_integration])
+    return epsilon
 
 
 def plot_training_history(history):
