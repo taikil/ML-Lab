@@ -10,6 +10,8 @@ from keras import models
 import hdf5storage
 from display_graph import *
 from cnn import *
+import h5py
+import mat73
 
 
 def get_file():
@@ -22,33 +24,41 @@ def get_file():
         sys.exit()
 
 
+def inspect_mat_file(filename):
+    with h5py.File(filename, 'r') as f:
+        print("Keys in the .mat file:")
+        for key in f.keys():
+            print(key)
+
+
 def load_mat_file(filename):
-    try:
-        mat_contents = scipy.io.loadmat(
-            filename, struct_as_record=False, squeeze_me=True)
-        data = mat_contents.get('data', None)
-        dataset = mat_contents.get('dataset', None)
+    print("Loading .mat file using mat73.")
+    mat_contents = mat73.loadmat(filename)
 
-        if data is None or dataset is None:
-            raise ValueError(
-                "The .mat file does not contain both 'data' and 'dataset' variables.")
+    print("Keys in mat_contents:", mat_contents.keys())
 
-        print("Loaded .mat file using scipy.io.loadmat.")
+    data = mat_contents.get('data', None)
+    dataset = mat_contents.get('dataset', None)
+
+    if data is not None and dataset is not None:
         return data, dataset
-    except NotImplementedError:
-        # Fallback to hdf5storage for MATLAB v7.3 files
-        print("Loading .mat file using hdf5storage.")
-        mat_contents = hdf5storage.loadmat(filename)
-        data = mat_contents.get('data', None)
-        dataset = mat_contents.get('dataset', None)
-        print("Keys in mat_contents:", mat_contents.keys())
-        if 'data' in mat_contents and 'dataset' in mat_contents:
-            data = mat_contents['data']
-            dataset = mat_contents['dataset']
-            return data, dataset
-        else:
-            raise ValueError(
-                "The .mat file does not contain 'data' and 'dataset' variables.")
+    else:
+        raise ValueError(
+            "The .mat file does not contain 'data' and 'dataset' variables.")
+
+# def load_mat_file(filename):
+#     print("Loading .mat file using hdf5storage.")
+#     mat_contents = hdf5storage.loadmat(filename)
+#     data = mat_contents.get('data', None)
+#     dataset = mat_contents.get('dataset', None)
+#     print("Keys in mat_contents:", mat_contents.keys())
+#     if 'data' in mat_contents and 'dataset' in mat_contents:
+#         data = mat_contents['data']
+#         dataset = mat_contents['dataset']
+#         return data, dataset
+#     else:
+#         raise ValueError(
+#             "The .mat file does not contain 'data' and 'dataset' variables.")
 
 
 def process_profile(data, dataset, params, profile_num=0, model=None):
@@ -63,24 +73,24 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     fs_slow = float(fs_slow)
 
     # Get the number of profiles
-    num_profiles = dataset['P_slow'].shape[1]
+    num_profiles = len(dataset['P_slow'])
     if profile_num >= num_profiles:
         raise ValueError(
             f"Profile number {profile_num} exceeds available profiles ({num_profiles}).")
 
     # Extract variables for the selected profile
     try:
-        P_slow = np.squeeze(dataset['P_slow'][0, profile_num])
-        JAC_T = np.squeeze(dataset['JAC_T'][0, profile_num])
-        JAC_C = np.squeeze(dataset['JAC_C'][0, profile_num])
-        P_fast = np.squeeze(dataset['P_fast'][0, profile_num])
-        W_slow = np.squeeze(dataset['W_slow'][0, profile_num])
-        W_fast = np.squeeze(dataset['W_fast'][0, profile_num])
-        sh1 = np.squeeze(dataset['sh1'][0, profile_num])
-        sh2 = np.squeeze(dataset['sh2'][0, profile_num])
-        Ax = np.squeeze(dataset['Ax'][0, profile_num])
-        Ay = np.squeeze(dataset['Ay'][0, profile_num])
-        T1_fast = np.squeeze(dataset['T1_fast'][0, profile_num])
+        P_slow = np.squeeze(dataset['P_slow'][profile_num])
+        JAC_T = np.squeeze(dataset['JAC_T'][profile_num])
+        JAC_C = np.squeeze(dataset['JAC_C'][profile_num])
+        P_fast = np.squeeze(dataset['P_fast'][profile_num])
+        W_slow = np.squeeze(dataset['W_slow'][profile_num])
+        W_fast = np.squeeze(dataset['W_fast'][profile_num])
+        sh1 = np.squeeze(dataset['sh1'][profile_num])
+        sh2 = np.squeeze(dataset['sh2'][profile_num])
+        Ax = np.squeeze(dataset['Ax'][profile_num])
+        Ay = np.squeeze(dataset['Ay'][profile_num])
+        T1_fast = np.squeeze(dataset['T1_fast'][profile_num])
     except KeyError as e:
         raise KeyError(f"Missing expected field in dataset: {e}")
 
@@ -277,6 +287,9 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
 
             # Prepare spectral input
             # Shape: (spectrum_length, 2)
+            print(f"P_sh_log shape: {P_sh_log.shape}")
+            print(f"nasmyth log shape: {P_nasmyth_log.shape}")
+            print(f"K_normalized shape: {K_normalized.shape}")
             spectrum_input = np.stack(
                 (P_sh_log, P_nasmyth_log, K_normalized), axis=-1)
             # Add batch dimension
@@ -446,7 +459,7 @@ def main():
             print(f"Failed to load the model from {model_filename}: {e}")
             sys.exit("Cannot proceed without a valid model.")
 
-    num_profiles = dataset['P_slow'].shape[1]
+    num_profiles = len(dataset['P_slow'])
     print(f"Number of profiles in dataset: {num_profiles}")
     # Loop over all profiles or prompt for specific profile
     profile_num = int(

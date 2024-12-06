@@ -434,7 +434,7 @@ def variance_method(K, shear_spectrum, e_1, nu, K_AA, fit_order):
     e_4 = e_3 + 0.25 * 7.5 * nu * K[1] * phi[0]
     if isinstance(e_4, np.ndarray):
         e_4 = e_4[0]
-    e_4 = float(e_4)
+    # e_4 = float(e_4)
     if e_4 / e_3 > 1.1:
         e_new = e_4 / variance_resolved
         while True:
