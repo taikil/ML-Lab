@@ -46,20 +46,6 @@ def load_mat_file(filename):
         raise ValueError(
             "The .mat file does not contain 'data' and 'dataset' variables.")
 
-# def load_mat_file(filename):
-#     print("Loading .mat file using hdf5storage.")
-#     mat_contents = hdf5storage.loadmat(filename)
-#     data = mat_contents.get('data', None)
-#     dataset = mat_contents.get('dataset', None)
-#     print("Keys in mat_contents:", mat_contents.keys())
-#     if 'data' in mat_contents and 'dataset' in mat_contents:
-#         data = mat_contents['data']
-#         dataset = mat_contents['dataset']
-#         return data, dataset
-#     else:
-#         raise ValueError(
-#             "The .mat file does not contain 'data' and 'dataset' variables.")
-
 
 def process_profile(data, dataset, params, profile_num=0, model=None):
     """
@@ -134,12 +120,16 @@ def load_output_data(output_filename):
     except NotImplementedError:
         # Fallback to hdf5storage for MATLAB v7.3 files
         print("Loading .mat file using hdf5storage.")
-        mat_contents = hdf5storage.loadmat(output_filename)
+        mat_contents = mat73.loadmat(output_filename)
         diss = mat_contents.get('diss', None)
         if diss is None:
             raise ValueError(
                 "The .mat file does not contain both 'data' and 'dataset' variables.")
         return diss
+
+    except FileNotFoundError:
+        print(f"File: {output_filename} does not exist, skipping profile.")
+        return None
 
 
 def extract_output_labels(diss):

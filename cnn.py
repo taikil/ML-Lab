@@ -18,7 +18,7 @@ def prepare_training_data(data, dataset, params, filename):
     integration_ranges = []
     flagoods = []
 
-    num_profiles = dataset.size
+    num_profiles = len(dataset['P_slow'])
 
     print(f"Number of profiles available for training: {num_profiles}")
 
@@ -29,6 +29,8 @@ def prepare_training_data(data, dataset, params, filename):
         training_file = f"{filename[:-4]}_dissrate_{i+1:03d}.mat"
         # print(f"Training File: {training_file}")
         diss_data = load_output_data(training_file)
+        if (diss_data is None):
+            continue
         training_labels = extract_output_labels(diss_data)
         num_windows = training_labels['e'].shape[0]
         num_probes = training_labels['e'].shape[1]
