@@ -104,19 +104,19 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
         P_sh_clean *= W * correction
         P_sh *= W * correction
 
-        n_shear, _, n_freqs = P_sh.shape
-        with open('P_sh_output.txt', 'w') as file:
-            for freq_idx in range(n_freqs):
-                file.write(f"Frequency Index {freq_idx}:\n")
-                for i in range(n_shear):
-                    row = ''
-                    for j in range(n_shear):
-                        val = P_sh[i, j, freq_idx]
-                        # Format complex number
-                        val_str = f"{val.real:+.6e} {val.imag:+.6e}i"
-                        row += val_str + '\t'
-                    file.write(row.strip() + '\n')
-                file.write('\n')
+        # n_shear, _, n_freqs = P_sh.shape
+        # with open('P_sh_output.txt', 'w') as file:
+        #     for freq_idx in range(n_freqs):
+        #         file.write(f"Frequency Index {freq_idx}:\n")
+        #         for i in range(n_shear):
+        #             row = ''
+        #             for j in range(n_shear):
+        #                 val = P_sh[i, j, freq_idx]
+        #                 # Format complex number
+        #                 val_str = f"{val.real:+.6e} {val.imag:+.6e}i"
+        #                 row += val_str + '\t'
+        #             file.write(row.strip() + '\n')
+        #         file.write('\n')
 
         e = np.zeros(num_probes)
         K_max = np.zeros(num_probes)

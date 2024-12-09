@@ -239,7 +239,7 @@ def plot_training_history(history):
     history_dict = history.history
 
     # Create subplots for losses and metrics
-    fig, axs = plt.subplots(2, 3, figsize=(16, 10))
+    fig, axs = plt.subplots(2, 3, figsize=(12, 8))
 
     # Plot overall loss
     axs[0, 0].plot(history_dict['loss'], label='Train Loss')

@@ -88,7 +88,7 @@ def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
     _, sh2_clean = wiener(sh2[n], Ax[n], N)
     _, sh2_clean = wiener(sh2_clean, Ay[n], N)
 
-    np.savetxt("sh1_wiener.txt", sh1_clean, fmt='%.6e')
+    # np.savetxt("sh1_wiener.txt", sh1_clean, fmt='%.6e')
     # # High-pass filter
     # HP_cut = params['HP_cut']
     # b_hp, a_hp = butter(4, HP_cut / (fs_fast / 2), btype='high')

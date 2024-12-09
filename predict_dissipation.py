@@ -221,7 +221,7 @@ def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, 
     T = T1_fast
     P = P_fast
 
-    np.savetxt("sh_diss.txt", SH, fmt='%.6e')
+    # np.savetxt("sh_diss.txt", SH, fmt='%.6e')
 
     # Set parameters for dissipation calculation
     fft_length = int(params['fft_length'] * fs_fast)
