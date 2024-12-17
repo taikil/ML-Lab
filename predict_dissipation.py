@@ -7,10 +7,8 @@ from scipy.optimize import brentq
 from diss_rate_odas_nagai import *
 from helper import *
 from keras import models
-import hdf5storage
 from display_graph import *
 from cnn import *
-import h5py
 import mat73
 
 
@@ -22,13 +20,6 @@ def get_file():
         print("Invalid Input; Provide the .mat filename as a command-line argument.")
         print("Exiting Program...")
         sys.exit()
-
-
-def inspect_mat_file(filename):
-    with h5py.File(filename, 'r') as f:
-        print("Keys in the .mat file:")
-        for key in f.keys():
-            print(key)
 
 
 def load_mat_file(filename):
@@ -86,20 +77,17 @@ def process_profile(data, dataset, params, profile_num=0, model=None):
     N2 = compute_buoyancy_frequency(sigma_theta_fast, P_fast)
 
     # Prepare profile indices
-    n, m = get_profile_indices(
-        P_fast, P_slow, params, fs_slow, fs_fast)
+    n, m = get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast)
 
     nn = np.where((P_fast[n] > params['P_start']) &
                   (P_fast[n] <= params['P_end']))[0]
     range1 = n[nn]  # Subset of fast data based on pressure
 
-    # Despike and filter shear data
-
     sh1_HP, sh2_HP = despike_and_filter_sh(
         sh1, sh2, Ax, Ay, range1, fs_fast, params)
 
     diss = calculate_dissipation_rate(
-        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model)
+        sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, range1, model)
 
     return diss
 
@@ -198,28 +186,31 @@ def find_K_min(epsilon, nu, K, P_shear, K_max):
     return K_min_solution
 
 
-def get_profile_indices(P_fast, P_slow, params, fs_slow, fs_fast):
-    start_index_slow = 0
-    end_index_slow = len(P_slow) - 1
-    start_index_fast = 0
-    end_index_fast = len(P_fast) - 1
+def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
+    profile = get_profile(P_slow, W_slow, params['P_min'], params['W_min'],
+                          params['direction'], params['min_duration'], fs_slow)
+
+    start_index_slow = profile[0, 0] - 1
+    end_index_slow = profile[1, 0] - 1
+
+    start_index_fast = int(1 + round((fs_fast/fs_slow)*(start_index_slow)))
+    end_index_fast = int(round((fs_fast/fs_slow)*(end_index_slow)))
 
     n = np.arange(start_index_fast, end_index_fast + 1)
-    m = np.arange(start_index_slow, int(
-        end_index_fast / (fs_fast / fs_slow)) + 1)
+    m = np.arange(start_index_slow, end_index_slow + 1)
     return n, m
 
 
-def calculate_dissipation_rate(sh1_HP, sh2_HP, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, model):
+def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, params, fs_fast, range1, model):
     """
     Calculate the dissipation rate over smaller windows using the CNN-predicted integration range.
     """
     # Prepare variables
-    SH = np.column_stack((sh1_HP, sh2_HP))
-    A = np.column_stack((Ax, Ay))
-    speed = W_fast
-    T = T1_fast
-    P = P_fast
+    SH = np.column_stack((sh1, sh2))
+    A = np.column_stack((Ax[range1], Ay[range1]))
+    speed = W_fast[range1]
+    T = T1_fast[range1]
+    P = P_fast[range1]
 
     # np.savetxt("sh_diss.txt", SH, fmt='%.6e')
 
@@ -374,9 +365,9 @@ def save_dissipation_rate(filename, diss_results, profile_num):
 
 def main():
     params = {
-        'HP_cut': 1.0,          # High-pass filter cutoff frequency (Hz)
-        'LP_cut': 10.0,         # Low-pass filter cutoff frequency (Hz)
-        'P_min': 5.0,           # Minimum pressure (dbar)
+        'HP_cut': 0.2,          # High-pass filter cutoff frequency (Hz)
+        'LP_cut': 6.0,         # Low-pass filter cutoff frequency (Hz)
+        'P_min': 15.0,           # Minimum pressure (dbar)
         'W_min': 0.1,           # Minimum profiling speed (m/s)
         'direction': 'down',    # Profiling direction
         'fft_length': 4.0,      # FFT length (s)
@@ -388,10 +379,10 @@ def main():
         'fit_2_isr': 1.5e-5,
         # Maximum frequency to use when estimating dissipation (Hz)
         'f_limit': np.inf,
-        'min_duration': 60.0,   # Minimum profile duration (s)
+        'min_duration': 20.0,   # Minimum profile duration (s)
         # Profile number to process (fixed to 1 for naming)
         'profile_num': 1,
-        'P_start': 0.0,         # Start pressure (dbar)
+        'P_start': 10.0,         # Start pressure (dbar)
         'P_end': 1000.0         # End pressure (dbar)
     }
     FILENAME = get_file()

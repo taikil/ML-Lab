@@ -98,13 +98,93 @@ def despike_and_filter_sh(sh1, sh2, Ax, Ay, n, fs_fast, params):
     # print("First few elements of sh1_HP in Python:")
     # print(sh1_HP[:10])
 
-    # # Low-pass filter to obtain band-pass filtered data
-    # LP_cut = params['LP_cut']
-    # b_lp, a_lp = butter(4, LP_cut / (fs_fast / 2), btype='low')
-    # sh1_BP = filtfilt(b_lp, a_lp, sh1_HP, padtype='even')
-    # sh2_BP = filtfilt(b_lp, a_lp, sh2_HP, padtype='even')
-
     return sh1_clean, sh2_clean
+
+
+def get_profile(P, W, P_min, W_min, direction, min_duration, fs):
+    """
+    Extract indices where an instrument is moving up or down.
+
+    Parameters
+    ----------
+    P : array_like
+        Pressure vector.
+    W : array_like
+        Rate-of-change of pressure vector (dP/dt).
+    P_min : float
+        Minimum pressure for a valid profile.
+    W_min : float
+        Minimum magnitude of rate-of-change of pressure for a valid profile.
+    direction : str
+        Direction of profile, either 'up' or 'down'.
+    min_duration : float
+        Minimum duration (in seconds) for a valid profile.
+    fs : float
+        Sampling rate of P and W in samples per second.
+
+    Returns
+    -------
+    profile : ndarray
+        2 x N array, where each column is a profile [start_index; end_index].
+        If no profiles are detected, returns an empty array.
+
+    Notes
+    -----
+    This function identifies contiguous segments in the data where the profiler
+    is moving in the specified `direction` (up or down) at a rate above `W_min`
+    and at pressures above `P_min` for at least `min_duration` seconds.
+    """
+    P = np.asarray(P)
+    W = np.asarray(W)
+
+    min_samples = int(min_duration * fs)
+    # If direction is 'up', invert W so that we look for W >= W_min
+    if direction.lower() == 'up':
+        W = -W
+
+    # Find indices where conditions are met
+    n = np.where((P > P_min) & (W >= W_min))[0]
+    if len(n) < min_samples:
+        return np.array([])
+
+    diff_n = np.diff(n)
+    # Prepend diff_n(1) from MATLAB is equivalent to diff_n[0] in Python.
+    # In MATLAB: diff_n = [diff_n(1); diff_n], we replicate this by just reusing diff_n as is,
+    # because the MATLAB code uses diff_n(1) (the first element) and then concatenates the rest.
+    # Actually, the MATLAB code inserts the first diff value twice, which seems unusual.
+    # It appears to be a trick to detect breaks. The first difference won't matter since
+    # the first point is continuous from nothing. Emulating the logic by:
+    # diff_n = np.concatenate(([diff_n[0]], diff_n))
+    if len(diff_n) > 0:
+        diff_n = np.concatenate(([diff_n[0]], diff_n))
+    else:
+        # If there's only one element in n, diff_n is empty
+        pass
+
+    # Find breaks where diff_n > 1
+    m = np.where(diff_n > 1)[0]
+
+    if m.size == 0:
+        # Only one profile
+        profile = np.array([[n[0]], [n[-1]]])
+    else:
+        profile = np.zeros((2, len(m) + 1), dtype=int)
+        profile[0, 0] = n[0]
+        profile[1, 0] = n[m[0]-1]
+
+        for idx in range(1, len(m)):
+            profile[0, idx] = n[m[idx-1]]
+            profile[1, idx] = n[m[idx]-1]
+
+        profile[0, -1] = n[m[-1]]
+        profile[1, -1] = n[-1]
+
+    # Check the length of each profile
+    profile_length = profile[1, :] - profile[0, :]
+    mm = np.where(profile_length >= min_samples)[0]
+    profile = profile[:, mm]
+
+    return profile
 
 
 def compute_density(JAC_T, JAC_C, P_slow, P_fast, fs_slow, fs_fast):

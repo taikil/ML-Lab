@@ -41,6 +41,8 @@ def clean(A, U, n_fft, rate):
     if not isinstance(rate, (int, float)) or rate <= 0:
         raise ValueError('Sampling rate must be positive.')
 
+    np.savetxt("U_sh.txt", U, fmt='%.6e')
+
     # Create the same cosine window as in MATLAB
     # Window = 1 + cos(pi * (-1 + 2*(0:n_fft-1)/n_fft))
     # Normalize to have mean-square = 1

@@ -15,7 +15,7 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
             'Invalid size for diss_length - must be greater than 2 * fft_length.')
 
     if SH.shape[0] != A.shape[0] or SH.shape[0] != T.shape[0] or SH.shape[0] != P.shape[0]:
-        raise ValueError(
+        print(
             f"Same number of rows required for SH, A, T, P... SH: {SH.shape[0]}, A: {A.shape[0]}, T: {T.shape[0]}, P: {P.shape[0]}")
 
     if not np.isscalar(speed) and len(speed) != SH.shape[0]:
@@ -82,6 +82,8 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
     index = 0
     while select[-1] < SH.shape[0] - 1:
         # Call clean_shear_spec
+
+        np.savetxt("A_A.txt", A, fmt='%.6e')
         P_sh_clean, AA, P_sh, UA, F = clean(
             A[select, :], SH[select, :], fft_length, fs)
         # P_sh_clean and P_sh have shape [num_probes, num_probes, F_length]
