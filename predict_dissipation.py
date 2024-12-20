@@ -192,10 +192,8 @@ def get_profile_indices(P_slow, W_slow, params, fs_slow, fs_fast):
 
     start_index_slow = profile[0, 0] - 1
     end_index_slow = profile[1, 0] - 1
-
     start_index_fast = int(1 + round((fs_fast/fs_slow)*(start_index_slow)))
     end_index_fast = int(round((fs_fast/fs_slow)*(end_index_slow)))
-
     n = np.arange(start_index_fast, end_index_fast + 1)
     m = np.arange(start_index_slow, end_index_slow + 1)
     return n, m
@@ -436,6 +434,7 @@ def main():
         try:
             model = models.load_model(model_filename)
             print(f"Loaded existing CNN model from {model_filename}")
+            model.summary()
         except (IOError, OSError, ValueError) as e:
             print(f"Failed to load the model from {model_filename}: {e}")
             sys.exit("Cannot proceed without a valid model.")

@@ -1,0 +1,9 @@
+matplotlib>=3.0
+numpy>=1.18
+scipy>=1.4
+h5py>=2.10
+mat73>=0.60
+gsw>=3.3.1
+tensorflow>=2.0
+scikit-learn>=0.22
+keras>=2.4

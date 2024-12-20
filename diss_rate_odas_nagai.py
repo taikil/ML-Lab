@@ -57,7 +57,6 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
     diss['K_max'] = np.zeros_like(diss['e'])
     diss['method'] = np.zeros_like(diss['e'])
     diss['Nasmyth_spec'] = np.zeros((number_of_rows, num_probes, F_length))
-    # diss['sh'] = np.zeros((number_of_rows, num_probes, num_probes, F_length))
     diss['sh'] = np.zeros(
         (number_of_rows, num_probes, num_probes, F_length), dtype=np.complex128)
     diss['sh_clean'] = np.zeros_like(diss['sh'])
@@ -83,7 +82,6 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
     while select[-1] < SH.shape[0] - 1:
         # Call clean_shear_spec
 
-        np.savetxt("A_A.txt", A, fmt='%.6e')
         P_sh_clean, AA, P_sh, UA, F = clean(
             A[select, :], SH[select, :], fft_length, fs)
         # P_sh_clean and P_sh have shape [num_probes, num_probes, F_length]
@@ -105,20 +103,6 @@ def get_diss_odas_nagai4gui2024(SH, A, fft_length, diss_length, overlap, fs,
 
         P_sh_clean *= W * correction
         P_sh *= W * correction
-
-        # n_shear, _, n_freqs = P_sh.shape
-        # with open('P_sh_output.txt', 'w') as file:
-        #     for freq_idx in range(n_freqs):
-        #         file.write(f"Frequency Index {freq_idx}:\n")
-        #         for i in range(n_shear):
-        #             row = ''
-        #             for j in range(n_shear):
-        #                 val = P_sh[i, j, freq_idx]
-        #                 # Format complex number
-        #                 val_str = f"{val.real:+.6e} {val.imag:+.6e}i"
-        #                 row += val_str + '\t'
-        #             file.write(row.strip() + '\n')
-        #         file.write('\n')
 
         e = np.zeros(num_probes)
         K_max = np.zeros(num_probes)

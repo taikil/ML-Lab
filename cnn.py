@@ -8,6 +8,8 @@ import numpy as np
 
 import numpy as np
 
+# TODO: IF BAD DATA, handle accordingly for interval pred
+
 
 def prepare_training_data(data, dataset, params, filename):
     """

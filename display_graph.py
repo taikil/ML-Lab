@@ -83,6 +83,7 @@ def plot_spectra_interactive(spectra_data):
 
     # Function to recompute epsilon and update the plot
     def recompute_epsilon(index):
+        print(f"Index: {index}")
         data = spectra_data[index]
         k_obs = data['k_obs']
         P_shear_obs = data['P_shear_obs']
