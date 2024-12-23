@@ -1,6 +1,6 @@
 # Dissipation CNN
 
-Convolutional Neural Network to extract dissipation rate from VMP-45 dataset
+Convolutional Neural Network to extract dissipation rate from VMP-250 dataset
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ Convolutional Neural Network to extract dissipation rate from VMP-45 dataset
 
 ## Introduction
 
-The Dissipation CNN prediction project is designed to streamline the process in processing data from the VMP-45. 
+The Dissipation CNN prediction project is designed to streamline the process in processing data from the VMP-250. 
 The project takes in the raw .MAT data from the VMP, and will output the dissipation rate calculations, and shear spectra.
 This repository provides tools for analyzing dissipation rates of ocean shear data, integrating MATLAB-derived methods into a Python workflow. It includes:
 
@@ -28,6 +28,7 @@ After it has computed the integration range, it uses the following formula:
 
 $$\epsilon_{\text{cnn}} = 7.5 \cdot \nu \cdot \int_{K_{\min}}^{K_{\max}} P_{\text{sh}}(K) \, dK$$
 
+The model also outputs a confidence interval as to the quality of the data, which is represented from 0 - 1 in the `flagood` output variable.
 
 ## Features
 
