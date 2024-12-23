@@ -92,13 +92,14 @@ def plot_spectra_interactive(spectra_data):
         k_end = integration_clicks['k_end']
 
         # Update best_k_range
+        print(f"K range before: {data['best_k_range']}")
         data['best_k_range'] = [k_start, k_end]
+        print(f"K range after: {data['best_k_range']}")
 
         # Recompute best_epsilon using the new integration range
-        # Implement your method to compute epsilon here
-        # For example:
         data['best_epsilon'] = compute_epsilon(
             k_obs, P_shear_obs, nu, k_start, k_end)
+        print(f"epsilon after: {data['best_epsilon']}")
 
         # Recompute Nasmyth spectrum with new epsilon
         data['P_nasmyth'], _ = nasmyth(data['best_epsilon'], nu, k_obs)
@@ -224,9 +225,16 @@ def generate_reference_nasmyth_spectra(K):
     return p00_list, K
 
 
-def compute_epsilon(K, P_sh, nu, k_max, k_min):
+def compute_epsilon(K, P_sh, nu, k_min, k_max):
+    print(f"K: {K}")
+    print(f"P_sh: {P_sh}")
+    print(f"nu: {nu}")
+    print(f"k_max: {k_max}")
+    print(f"k_max: {k_min}")
+
     idx_integration = np.where(
         (K >= k_min) & (K <= k_max))[0]
+    print(f"idx integration: {idx_integration}")
     epsilon = 7.5 * nu * \
         np.trapz(P_sh[idx_integration],
                  K[idx_integration])
