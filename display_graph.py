@@ -19,8 +19,12 @@ def plot_spectra_interactive(spectra_data):
     Parameters:
     - spectra_data (list of dict): A list where each element is a dictionary containing
       the data for one plot. Each dictionary should have the keys:
-      'k_obs', 'P_shear_obs', 'P_nasmyth', 'best_k_range', 'best_epsilon', 'window_index', 'probe_index', 'nu'
+      'k_obs', 'P_shear_obs', 'P_nasmyth', 'k_min' 'k_max', 'best_epsilon',
+      'window_index', 'probe_index', 'nu'
     """
+
+    plot_spectra_interactive.saved_data = None
+
     # Initialize plot index
     plot_idx = {'current': 0}
 
@@ -30,18 +34,29 @@ def plot_spectra_interactive(spectra_data):
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(10, 6))
     plt.subplots_adjust(bottom=0.25)  # Adjust to make room for buttons
-    integration_clicks = {'click_count': 0, 'k_start': None, 'k_end': None}
-    selecting_range = False  # Flag to indicate if we're selecting a new range
-    instruction_text = None  # To store the instruction text object
 
-    # Function to update plot
+    # We'll store the integration range and whether we are selecting start/end
+    integration_clicks = {
+        'k_start': None,
+        'k_end': None,
+        'selecting_start': False,
+        'selecting_end': False
+    }
+
+    instruction_text = None  # Will hold any active instruction text
+
+    # ----------------------------------------------------------------------
+    # 1. Plot & Update
+    # ----------------------------------------------------------------------
     def update_plot(index):
         ax.clear()
         data = spectra_data[index]
+
         k_obs = data['k_obs']
         P_shear_obs = data['P_shear_obs']
         P_nasmyth = data['P_nasmyth']
-        best_k_range = data['best_k_range']
+        k_min = data['k_min']
+        k_max = data['k_max']
         best_epsilon = data['best_epsilon']
         window_index = data['window_index']
         probe_index = data['probe_index']
@@ -50,20 +65,21 @@ def plot_spectra_interactive(spectra_data):
         # Plot observed shear spectrum
         ax.loglog(k_obs, P_shear_obs, linewidth=0.7,
                   color='r', label='Observed Shear Spectrum')
+
         # Plot Nasmyth spectrum for estimated epsilon
         ax.loglog(k_obs, P_nasmyth, 'k', linewidth=2,
-                  label=f'Nasmyth Spectrum (ε={best_epsilon:.2e} W/kg)')
+                  label=f'Nasmyth (ε={best_epsilon:.2e} W/kg)')
 
         # Plot reference Nasmyth spectra
         p00_list, k00 = generate_reference_nasmyth_spectra(k_obs)
         for p00 in p00_list:
             ax.loglog(k00, p00, 'b--', linewidth=1)
 
-        # Plot integration range
-        ax.axvline(best_k_range[0], color='r',
-                   linestyle='--', label='Integration Range Start')
-        ax.axvline(best_k_range[1], color='g',
-                   linestyle='--', label='Integration Range End')
+        # Plot integration range lines
+        ax.axvline(k_min, color='r', linestyle='--',
+                   label='Integration Range Start')
+        ax.axvline(k_max, color='g', linestyle='--',
+                   label='Integration Range End')
 
         ax.set_xlabel('Wavenumber (cpm)')
         ax.set_ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
@@ -76,30 +92,45 @@ def plot_spectra_interactive(spectra_data):
 
         # If instruction text exists, redraw it
         if instruction_text is not None:
-            ax.text(0.5, 0.95, instruction_text.get_text(), transform=ax.transAxes,
-                    fontsize=12, color='blue', ha='center', va='top')
+            ax.text(0.5, 0.95, instruction_text.get_text(),
+                    transform=ax.transAxes,
+                    fontsize=12, color='blue',
+                    ha='center', va='top')
 
         fig.canvas.draw_idle()
 
-    # Function to recompute epsilon and update the plot
+    # ----------------------------------------------------------------------
+    # 2. Recompute Epsilon
+    # ----------------------------------------------------------------------
     def recompute_epsilon(index):
-        print(f"Index: {index}")
+        """Given the new k_start/k_end, recalc epsilon, update the plot."""
         data = spectra_data[index]
         k_obs = data['k_obs']
         P_shear_obs = data['P_shear_obs']
         nu = data['nu']
+
         k_start = integration_clicks['k_start']
         k_end = integration_clicks['k_end']
 
+        if k_start is None and k_end is None:
+            return  # If both are unset, do nothing
+        # Selecting k_end
+        elif k_start is None and k_end is not None:
+            k_start = data['k_min']
+        # Selecing k_start
+        elif k_start is not None and k_end is None:
+            k_end = data['k_max']
+        # Ensure k_start < k_end
+        if k_start > k_end:
+            k_start, k_end = k_end, k_start
+
         # Update best_k_range
-        print(f"K range before: {data['best_k_range']}")
-        data['best_k_range'] = [k_start, k_end]
-        print(f"K range after: {data['best_k_range']}")
+        data['k_min'] = k_start
+        data['k_max'] = k_end
 
         # Recompute best_epsilon using the new integration range
-        data['best_epsilon'] = compute_epsilon(
-            k_obs, P_shear_obs, nu, k_start, k_end)
-        print(f"epsilon after: {data['best_epsilon']}")
+        data['best_epsilon'] = compute_epsilon(k_obs, P_shear_obs, nu,
+                                               k_start, k_end)
 
         # Recompute Nasmyth spectrum with new epsilon
         data['P_nasmyth'], _ = nasmyth(data['best_epsilon'], nu, k_obs)
@@ -107,116 +138,136 @@ def plot_spectra_interactive(spectra_data):
         # Update the plot
         update_plot(index)
 
-    # Define click event handler
+    # ----------------------------------------------------------------------
+    # 3. Click Handler (Selecting Start/End in the Axes)
+    # ----------------------------------------------------------------------
     def on_click(event):
-        nonlocal selecting_range, instruction_text
-        if not selecting_range:
-            return  # Ignore clicks if not selecting range
-
-        # Only consider clicks within the plot area
+        """If user is selecting start or end, capture xdata as new k_start or k_end."""
+        # Must be in axes
         if event.inaxes != ax:
             return
 
-        # Get the x-coordinate of the click (wavenumber)
-        k_click = event.xdata
+        print("Click at:", event.xdata, event.ydata)
+        print(f"Selecting Start: {integration_clicks['selecting_start']}")
+        print(f"Selecting End: {integration_clicks['selecting_end']}")
 
-        if k_click is None:
-            return
+        # Are we selecting start or end?
+        if integration_clicks['selecting_start']:
+            k_click = event.xdata
+            if k_click is not None:
+                integration_clicks['k_start'] = k_click
+                integration_clicks['selecting_start'] = False
+                recompute_epsilon(plot_idx['current'])
+                clear_instruction_text()
+                fig.canvas.draw_idle()
 
-        # Update click count and integration range
-        if integration_clicks['click_count'] == 0:
-            integration_clicks['k_start'] = k_click
-            integration_clicks['click_count'] = 1
-            print(f"Selected integration range start: {k_click:.2f} cpm")
-        elif integration_clicks['click_count'] == 1:
-            integration_clicks['k_end'] = k_click
-            integration_clicks['click_count'] = 2
-            print(f"Selected integration range end: {k_click:.2f} cpm")
+        elif integration_clicks['selecting_end']:
+            k_click = event.xdata
+            if k_click is not None:
+                integration_clicks['k_end'] = k_click
+                integration_clicks['selecting_end'] = False
+                recompute_epsilon(plot_idx['current'])
+                clear_instruction_text()
+                fig.canvas.draw_idle()
 
-            # Ensure k_start < k_end
-            if integration_clicks['k_start'] > integration_clicks['k_end']:
-                integration_clicks['k_start'], integration_clicks['k_end'] = integration_clicks['k_end'], integration_clicks['k_start']
-
-            # Recompute epsilon and update plot
-            recompute_epsilon(plot_idx['current'])
-
-            # Reset click count for next adjustment
-            integration_clicks['click_count'] = 0
-            selecting_range = False  # Disable range selection
-
-            # Remove instruction text
-            if instruction_text is not None:
-                instruction_text.remove()
-                instruction_text = None
-
-            fig.canvas.draw_idle()
-        else:
-            # Reset if more than two clicks
-            integration_clicks['click_count'] = 0
-
-    # Define button callbacks
+    # ----------------------------------------------------------------------
+    # 4. Buttons: Next/Prev
+    # ----------------------------------------------------------------------
     def next_plot(event):
-        nonlocal selecting_range, instruction_text
         if plot_idx['current'] < num_plots - 1:
             plot_idx['current'] += 1
             update_plot(plot_idx['current'])
-            # Reset selection
-            selecting_range = False
-            if instruction_text is not None:
-                instruction_text.remove()
-                instruction_text = None
+            clear_instruction_text()
 
     def prev_plot(event):
-        nonlocal selecting_range, instruction_text
         if plot_idx['current'] > 0:
             plot_idx['current'] -= 1
             update_plot(plot_idx['current'])
-            # Reset selection
-            selecting_range = False
-            if instruction_text is not None:
-                instruction_text.remove()
-                instruction_text = None
+            clear_instruction_text()
 
-    def reselect_range(event):
-        nonlocal selecting_range, instruction_text
-        selecting_range = True
-        integration_clicks['click_count'] = 0
-        integration_clicks['k_start'] = None
-        integration_clicks['k_end'] = None
+    # ----------------------------------------------------------------------
+    # 5. Buttons: Reselect Start/End, Save Results
+    # ----------------------------------------------------------------------
+    def reselect_start(event):
+        integration_clicks['selecting_start'] = True
+        integration_clicks['selecting_end'] = False
+        set_instruction_text("Click to choose new integration START")
 
-        # Remove previous instruction text if it exists
-        if instruction_text is not None:
-            instruction_text.remove()
+    def reselect_end(event):
+        integration_clicks['selecting_start'] = False
+        integration_clicks['selecting_end'] = True
+        set_instruction_text("Click to choose new integration END")
 
-        # Display instruction text
-        instruction = 'First click K_min, second click K_max'
-        instruction_text = ax.text(0.5, 0.95, instruction, transform=ax.transAxes,
-                                   fontsize=12, color='blue', ha='center', va='top')
+    def on_save_results(event):
+        # Here we can do whatever finalization or data extraction we need.
+        # For example, store the final 'spectra_data' so code outside this function can read it.
+        print("Saving final data and closing figure...")
+        plot_spectra_interactive.saved_data = spectra_data
 
+        # Then close the figure:
+        plt.close(fig)
+
+    # ----------------------------------------------------------------------
+    # 6. Instruction Text Helpers
+    # ----------------------------------------------------------------------
+    def set_instruction_text(msg):
+        nonlocal instruction_text
+        clear_instruction_text()  # remove old text first
+        instruction_text = ax.text(
+            0.5, 0.95, msg, transform=ax.transAxes,
+            fontsize=12, color='blue', ha='center', va='top'
+        )
         fig.canvas.draw_idle()
 
-    # Add buttons
-    axprev = plt.axes([0.5, 0.05, 0.1, 0.075])
-    axnext = plt.axes([0.61, 0.05, 0.1, 0.075])
-    axreselect = plt.axes([0.72, 0.05, 0.15, 0.075])
+    def clear_instruction_text():
+        nonlocal instruction_text
+        if instruction_text is not None:
+            instruction_text.remove()
+            instruction_text = None
+            fig.canvas.draw_idle()
+
+    # ----------------------------------------------------------------------
+    # 7. Place Buttons
+    # ----------------------------------------------------------------------
+    # Put the Previous button far left
+    axprev = plt.axes([0.05, 0.05, 0.1, 0.075])
+    # Put the Next button far right
+    axnext = plt.axes([0.17, 0.05, 0.1, 0.075])
 
     bprev = Button(axprev, 'Previous')
     bnext = Button(axnext, 'Next')
-    breselect = Button(axreselect, 'Reselect Range')
 
     bprev.on_clicked(prev_plot)
     bnext.on_clicked(next_plot)
-    breselect.on_clicked(reselect_range)
+
+    # Place the reselect buttons roughly in the center
+    ax_reselect_start = plt.axes([0.38, 0.05, 0.18, 0.075])
+    ax_reselect_end = plt.axes([0.58, 0.05, 0.18, 0.075])
+
+    b_reselect_start = Button(ax_reselect_start, 'Reselect Start')
+    b_reselect_end = Button(ax_reselect_end, 'Reselect End')
+
+    b_reselect_start.on_clicked(reselect_start)
+    b_reselect_end.on_clicked(reselect_end)
 
     # Connect the click event handler
     fig.canvas.mpl_connect('button_press_event', on_click)
 
-    # Initial plot
+    # Place the "Save results" button
+    ax_save = plt.axes([0.80, 0.05, 0.15, 0.075])
+    b_save = Button(ax_save, "Save results")
+    b_save.on_clicked(on_save_results)
+
+    # Initialize the first plot
     update_plot(plot_idx['current'])
     plt.show()
 
 
 def generate_reference_nasmyth_spectra(K):
+    """
+    Generate multiple reference Nasmyth spectra for
+    a range of epsilon values, for visual reference.
+    """
     epsilon_values = np.array([1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10])
     p00_list = []
     for e in epsilon_values:
@@ -226,18 +277,20 @@ def generate_reference_nasmyth_spectra(K):
 
 
 def compute_epsilon(K, P_sh, nu, k_min, k_max):
+    """
+    Compute epsilon from the integral of the shear spectrum
+    over the specified k-range.
+    """
     print(f"K: {K}")
     print(f"P_sh: {P_sh}")
     print(f"nu: {nu}")
+    print(f"k_min: {k_min}")
     print(f"k_max: {k_max}")
-    print(f"k_max: {k_min}")
 
-    idx_integration = np.where(
-        (K >= k_min) & (K <= k_max))[0]
-    print(f"idx integration: {idx_integration}")
-    epsilon = 7.5 * nu * \
-        np.trapz(P_sh[idx_integration],
-                 K[idx_integration])
+    idx_integration = np.where((K >= k_min) & (K <= k_max))[0]
+    print(f"idx_integration: {idx_integration}")
+
+    epsilon = 7.5 * nu * np.trapz(P_sh[idx_integration], K[idx_integration])
     return epsilon
 
 
@@ -284,10 +337,9 @@ def plot_training_history(history):
     axs[1, 0].legend()
 
     # Plot accuracy for flagood_output
-    axs[1, 1].plot(history_dict['flagood_output_accuracy'],
-                   label='Train Accuracy')
+    axs[1, 1].plot(history_dict['flagood_output_accuracy'], label='Train Acc')
     axs[1, 1].plot(history_dict['val_flagood_output_accuracy'],
-                   label='Val Accuracy')
+                   label='Val Acc')
     axs[1, 1].set_xlabel('Epoch')
     axs[1, 1].set_ylabel('Accuracy')
     axs[1, 1].set_title('Flagood Output Accuracy')

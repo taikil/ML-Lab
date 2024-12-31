@@ -337,7 +337,8 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
                 'k_obs': K,
                 'P_shear_obs': P_sh,
                 'P_nasmyth': P_nasmyth,
-                'best_k_range': [K_min_pred, K_max_pred],
+                'k_min': K_min_pred,
+                'k_max': K_max_pred,
                 'best_epsilon': epsilon_cnn,
                 'window_index': index,
                 'probe_index': probe_index,
@@ -346,7 +347,9 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
             spectra_data.append(plot_data)
 
     # Plot the spectra interactively
+    # TODO add return of updated data
     plot_spectra_interactive(spectra_data)
+    final_data = plot_spectra_interactive.saved_data
 
     return diss
 
