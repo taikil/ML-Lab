@@ -147,10 +147,6 @@ def plot_spectra_interactive(spectra_data):
         if event.inaxes != ax:
             return
 
-        print("Click at:", event.xdata, event.ydata)
-        print(f"Selecting Start: {integration_clicks['selecting_start']}")
-        print(f"Selecting End: {integration_clicks['selecting_end']}")
-
         # Are we selecting start or end?
         if integration_clicks['selecting_start']:
             k_click = event.xdata
@@ -281,14 +277,7 @@ def compute_epsilon(K, P_sh, nu, k_min, k_max):
     Compute epsilon from the integral of the shear spectrum
     over the specified k-range.
     """
-    print(f"K: {K}")
-    print(f"P_sh: {P_sh}")
-    print(f"nu: {nu}")
-    print(f"k_min: {k_min}")
-    print(f"k_max: {k_max}")
-
     idx_integration = np.where((K >= k_min) & (K <= k_max))[0]
-    print(f"idx_integration: {idx_integration}")
 
     epsilon = 7.5 * nu * np.trapz(P_sh[idx_integration], K[idx_integration])
     return epsilon

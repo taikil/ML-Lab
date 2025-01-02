@@ -266,9 +266,6 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
 
             # Prepare spectral input
             # Shape: (spectrum_length, 2)
-            print(f"P_sh_log shape: {P_sh_log.shape}")
-            print(f"nasmyth log shape: {P_nasmyth_log.shape}")
-            print(f"K_normalized shape: {K_normalized.shape}")
             spectrum_input = np.stack(
                 (P_sh_log, P_nasmyth_log, K_normalized), axis=-1)
             # Add batch dimension
@@ -290,6 +287,8 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
             flagood_pred = outputs['flagood_output']
             K_min_pred, K_max_pred = predicted_range[0]
             flagood_pred = flagood_pred[0][0]
+            if K_min_pred < 0.0:
+                K_min_pred = 0.0
 
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
@@ -306,6 +305,11 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
             # Calculate the final dissipation rate using the CNN-predicted integration range
             print(f"K_MAX PRED FOR INTEGRATION: {K_max_pred}")
             print(f"K_MIN PRED FOR INTEGRATION: {K_min_pred}")
+            if K_max_pred < K_min_pred:
+                print("K MAX ERROR, swapping values")
+                temp = K_min_pred
+                K_min_pred = K_max_pred
+                K_max_pred = temp
             idx_integration = np.where(
                 (K >= K_min_pred) & (K <= K_max_pred))[0]
             epsilon_cnn = 7.5 * nu * \
@@ -350,6 +354,8 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
     # TODO add return of updated data
     plot_spectra_interactive(spectra_data)
     final_data = plot_spectra_interactive.saved_data
+    if final_data is None:
+        return diss
 
     for item in final_data:
         i = item['window_index']

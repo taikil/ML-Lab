@@ -97,7 +97,6 @@ def prepare_training_data(data, dataset, params, filename):
     integration_ranges = np.array(
         integration_ranges)  # Shape: (num_samples, 2)
     flagoods = np.array(flagoods)
-    print(f"flagoods SHAPE: {flagoods.shape}")
 
     return spectra, scalar_features, integration_ranges, flagoods
 
@@ -133,9 +132,6 @@ def create_cnn_model(spectrum_input_shape, scalar_input_shape):
     output_flagood = layers.Dense(
         1, activation='sigmoid', name='flagood_output')(x)
 
-    print(f"output_integration shape: {output_integration.shape}")
-    print(f"output_flagood shape: {output_flagood.shape}")
-
     # Define Model
     model = models.Model(inputs=[spectrum_input, scalar_input], outputs={
         'integration_output': output_integration,
@@ -149,13 +145,16 @@ def train_cnn_model(data, dataset, params, filename, existing_model=None):
     spectra, scalar_features, integration_ranges, flagoods = prepare_training_data(
         data, dataset, params, filename)
 
+    # Lower weight of 'bad' data
+    sample_weights = np.where(flagoods == 1, 1.0, 0.1)
+
     if len(spectra) == 0:
         print("No training data was collected, there was an error in preparing the data")
         return
 
     # Split data into training and validation sets
-    X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_integration_train, y_integration_val, y_flagood_train, y_flagood_val = train_test_split(
-        spectra, scalar_features, integration_ranges, flagoods, test_size=0.2, random_state=42
+    X_spectrum_train, X_spectrum_val, X_scalar_train, X_scalar_val, y_integration_train, y_integration_val, y_flagood_train, y_flagood_val, sample_weights_train, sample_weight_val = train_test_split(
+        spectra, scalar_features, integration_ranges, flagoods, sample_weights, test_size=0.2, random_state=42
     )
 
     # Reshape y_flagood to have shape (batch_size, 1)
@@ -207,6 +206,7 @@ def train_cnn_model(data, dataset, params, filename, existing_model=None):
             'integration_output': y_integration_train,
             'flagood_output': y_flagood_train
         },
+        sample_weight=sample_weights_train,
         validation_data=(
             [X_spectrum_val, X_scalar_val],
             {
