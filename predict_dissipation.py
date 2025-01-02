@@ -351,6 +351,14 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
     plot_spectra_interactive(spectra_data)
     final_data = plot_spectra_interactive.saved_data
 
+    for item in final_data:
+        i = item['window_index']
+        p = item['probe_index']
+        diss['K_min'][i, p] = item['k_min']
+        diss['K_max'][i, p] = item['k_max']
+        diss['e'][i, p] = item['best_epsilon']
+        diss['Nasmyth_spec'][i, p, :] = item['P_nasmyth']
+
     return diss
 
 
