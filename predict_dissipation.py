@@ -294,12 +294,11 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
             if flagood_pred <= 0.3:
-                diss['flagood'][index, probe_index] = 0
+                flagood_pred = 0
             else:
-                diss['flagood'][index, probe_index] = 1
+                flagood_pred = 1
 
             diss['flagood'][index, probe_index] = flagood_pred
-
             # kinematic viscosity
             nu = diss['nu'][index, 0]
 
@@ -347,7 +346,8 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
                 'best_epsilon': epsilon_cnn,
                 'window_index': index,
                 'probe_index': probe_index,
-                'nu': nu
+                'nu': nu,
+                'flagood': flagood_pred
             }
             spectra_data.append(plot_data)
 
@@ -364,6 +364,7 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
         diss['K_min'][i, p] = item['k_min']
         diss['K_max'][i, p] = item['k_max']
         diss['e'][i, p] = item['best_epsilon']
+        diss['flagood'][i, p] = item['flagood']
         diss['Nasmyth_spec'][i, p, :] = item['P_nasmyth']
 
     return diss

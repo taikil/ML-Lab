@@ -20,7 +20,7 @@ def plot_spectra_interactive(spectra_data):
     - spectra_data (list of dict): A list where each element is a dictionary containing
       the data for one plot. Each dictionary should have the keys:
       'k_obs', 'P_shear_obs', 'P_nasmyth', 'k_min' 'k_max', 'best_epsilon',
-      'window_index', 'probe_index', 'nu'
+      'window_index', 'probe_index', 'nu', 'flagood'
     """
 
     plot_spectra_interactive.saved_data = None
@@ -60,7 +60,7 @@ def plot_spectra_interactive(spectra_data):
         best_epsilon = data['best_epsilon']
         window_index = data['window_index']
         probe_index = data['probe_index']
-        nu = data['nu']
+        flagood = data['flagood']
 
         # Plot observed shear spectrum
         ax.loglog(k_obs, P_shear_obs, linewidth=0.7,
@@ -80,13 +80,17 @@ def plot_spectra_interactive(spectra_data):
                    label='Integration Range Start')
         ax.axvline(k_max, color='g', linestyle='--',
                    label='Integration Range End')
+        if flagood:
+            flagood_text = ""
+        else:
+            flagood_text = '\nBad Data'
 
         ax.set_xlabel('Wavenumber (cpm)')
         ax.set_ylabel('Shear Spectrum [(s$^{-1}$)$^2$/cpm]')
         ax.set_xlim([1, 1000])
         ax.set_ylim([1e-10, 1])
         ax.set_title(
-            f'Shear Spectrum Fit (Window {window_index}, Probe {probe_index})')
+            f'Shear Spectrum Fit(Window {window_index}, Probe {probe_index}){flagood_text}')
         ax.legend()
         ax.grid(True, which='both', linestyle='--', linewidth=0.5)
 
@@ -203,6 +207,12 @@ def plot_spectra_interactive(spectra_data):
         # Then close the figure:
         plt.close(fig)
 
+    def on_toggle_flagood(event):
+        idx = plot_idx['current']
+        data = spectra_data[idx]
+        data['flagood'] = 1 - data['flagood']
+        update_plot(idx)
+
     # ----------------------------------------------------------------------
     # 6. Instruction Text Helpers
     # ----------------------------------------------------------------------
@@ -228,7 +238,7 @@ def plot_spectra_interactive(spectra_data):
     # Put the Previous button far left
     axprev = plt.axes([0.05, 0.05, 0.1, 0.075])
     # Put the Next button far right
-    axnext = plt.axes([0.17, 0.05, 0.1, 0.075])
+    axnext = plt.axes([0.16, 0.05, 0.1, 0.075])
 
     bprev = Button(axprev, 'Previous')
     bnext = Button(axnext, 'Next')
@@ -237,8 +247,8 @@ def plot_spectra_interactive(spectra_data):
     bnext.on_clicked(next_plot)
 
     # Place the reselect buttons roughly in the center
-    ax_reselect_start = plt.axes([0.38, 0.05, 0.18, 0.075])
-    ax_reselect_end = plt.axes([0.58, 0.05, 0.18, 0.075])
+    ax_reselect_start = plt.axes([0.35, 0.05, 0.15, 0.075])
+    ax_reselect_end = plt.axes([0.51, 0.05, 0.15, 0.075])
 
     b_reselect_start = Button(ax_reselect_start, 'Reselect Start')
     b_reselect_end = Button(ax_reselect_end, 'Reselect End')
@@ -246,13 +256,18 @@ def plot_spectra_interactive(spectra_data):
     b_reselect_start.on_clicked(reselect_start)
     b_reselect_end.on_clicked(reselect_end)
 
-    # Connect the click event handler
-    fig.canvas.mpl_connect('button_press_event', on_click)
+    # "Toggle Flagood" button
+    ax_toggle = plt.axes([0.74, 0.05, 0.10, 0.075])
+    b_toggle = Button(ax_toggle, "Bad Data")
+    b_toggle.on_clicked(on_toggle_flagood)
 
     # Place the "Save results" button
-    ax_save = plt.axes([0.80, 0.05, 0.15, 0.075])
-    b_save = Button(ax_save, "Save results")
+    ax_save = plt.axes([0.85, 0.05, 0.10, 0.075])
+    b_save = Button(ax_save, "Save & Quit")
     b_save.on_clicked(on_save_results)
+
+    # Connect the click event handler
+    fig.canvas.mpl_connect('button_press_event', on_click)
 
     # Initialize the first plot
     update_plot(plot_idx['current'])
