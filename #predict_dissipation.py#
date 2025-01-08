@@ -1,6 +1,5 @@
 from keras import models
 import sys
-import os
 import numpy as np
 import scipy.io
 from scipy.integrate import cumtrapz
@@ -289,14 +288,14 @@ def calculate_dissipation_rate(sh1, sh2, Ax, Ay, T1_fast, W_fast, P_fast, N2, pa
             K_min_pred, K_max_pred = predicted_range[0]
             flagood_pred = flagood_pred[0][0]
             if K_min_pred < 0.0:
-                K_min_pred = 1.0
+                K_min_pred = 0.0
 
             diss['K_min'][index, probe_index] = K_min_pred
             diss['K_max'][index, probe_index] = K_max_pred
-            if flagood_pred <= 0.3:
-                diss['flagood'][index, probe_index] = 0
-            else:
-                diss['flagood'][index, probe_index] = 1
+            # if flagood_pred <= 0.1:
+            #     diss['flagood'][index, probe_index] = 0
+            # else:
+            #     diss['flagood'][index, probe_index] = 1
 
             diss['flagood'][index, probe_index] = flagood_pred
 
@@ -379,27 +378,6 @@ def save_dissipation_rate(filename, diss_results, profile_num):
     print(f"Dissipation rate saved to {filename}")
 
 
-def auto_select_keras_file(directory="."):
-    """
-    Searches the given directory for exactly one *.keras file and returns it.
-    If multiple or none are found, returns None or handles it as needed.
-    """
-    # List .keras files
-    all_files = os.listdir(directory)
-    keras_files = [f for f in all_files if f.endswith('.keras')]
-
-    if len(keras_files) == 1:
-        # Exactly one file found, return it automatically
-        return os.path.join(directory, keras_files[0])
-    else:
-        # Either 0 or >1 files found; handle logic as needed
-        if not keras_files:
-            print("No .keras files found in the directory.")
-        else:
-            print(f"Found multiple .keras files: {keras_files}")
-        return None
-
-
 def main():
     params = {
         'HP_cut': 0.2,          # High-pass filter cutoff frequency (Hz)
@@ -426,15 +404,9 @@ def main():
     data, dataset = load_mat_file(FILENAME)
 
     # Load or train the CNN model for integration range prediction
-    model_filename = auto_select_keras_file()
-    if model_filename is None:
-        print("Unable to automatically detect keras file")
-        model_filename = input(
-            f"Enter desired model filename: ")
-        model_filename = f'{model_filename}.keras'
-    else:
-        print(f"Using model: {model_filename}")
-
+    model_filename = input(
+        f"Enter desired model filename: ")
+    model_filename = f'{model_filename}.keras'
     while True:
         choice = input(
             "Do you want to \n(1) continue training the existing model\n(2) train a new model\n(3) use the existing model without retraining?\nEnter 1, 2, or 3: ")
