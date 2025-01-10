@@ -397,7 +397,6 @@ def auto_select_keras_file(directory="."):
             print("Multiple .keras files found in the directory:")
             for i, filename in enumerate(keras_files, start=1):
                 print(f"{i}. {filename}")
-
             # Prompt user for selection
             while True:
                 try:
