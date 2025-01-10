@@ -60,7 +60,7 @@ The model also outputs a confidence interval as to the quality of the data, whic
  - Pressure `P`
  - Temperature `T`
  - Buoyancy Frequency `N2`
- - `Krho`
+ - Eddy diffusivity of density`Krho`
  - Data Flag `flagood`
 
 
