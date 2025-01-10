@@ -26,9 +26,6 @@ def get_file():
 def load_mat_file(filename):
     print("Loading .mat file using mat73.")
     mat_contents = mat73.loadmat(filename)
-
-    print("Keys in mat_contents:", mat_contents.keys())
-
     data = mat_contents.get('data', None)
     dataset = mat_contents.get('dataset', None)
 
@@ -397,7 +394,25 @@ def auto_select_keras_file(directory="."):
         if not keras_files:
             print("No .keras files found in the directory.")
         else:
-            print(f"Found multiple .keras files: {keras_files}")
+            print("Multiple .keras files found in the directory:")
+            for i, filename in enumerate(keras_files, start=1):
+                print(f"{i}. {filename}")
+
+            # Prompt user for selection
+            while True:
+                try:
+                    choice = int(
+                        input("Select the number of the .keras file you want to use: "))
+                    if 1 <= choice <= len(keras_files):
+                        selected_file = keras_files[choice - 1]
+                        print(f"You selected: {selected_file}")
+                        return os.path.join(directory, selected_file)
+                    else:
+                        print(
+                            f"Please enter a number between 1 and {len(keras_files)}.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+
         return None
 
 
@@ -469,6 +484,9 @@ def main():
     elif choice == '2':
         # Train a new model
         print("Training a new CNN model.")
+        model_filename = input(
+            f"Enter desired filename of the new model: ")
+        model_filename = f'{model_filename}.keras'
         model = train_cnn_model(data, dataset, params, FILENAME)
         if model is None:
             print("No model was returned by train_cnn_model.")

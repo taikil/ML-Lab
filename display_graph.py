@@ -199,7 +199,6 @@ def plot_spectra_interactive(spectra_data):
         set_instruction_text("Click to choose new integration END")
 
     def on_save_results(event):
-        # Here we can do whatever finalization or data extraction we need.
         # For example, store the final 'spectra_data' so code outside this function can read it.
         print("Saving final data and closing figure...")
         plot_spectra_interactive.saved_data = spectra_data
